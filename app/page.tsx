@@ -652,7 +652,7 @@ export default function Home() {
             alt="LifeOS character"
             width={714}
             height={714}
-            className="animate-float h-auto w-56 max-w-full sm:w-72 lg:-mr-8 lg:w-[476px] lg:self-end"
+            className="h-auto w-56 max-w-full sm:w-72 lg:-mr-8 lg:w-[476px] lg:self-end"
             priority
           />
         </main>
