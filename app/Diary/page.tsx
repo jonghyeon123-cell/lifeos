@@ -169,7 +169,9 @@ export default function DiaryPage() {
         <div className="mx-auto mt-8 max-w-2xl">
           {/* 작성 카드 */}
           <form onSubmit={handleSave} className={`${CARD} flex flex-col gap-3 p-4`}>
-            <div className="flex flex-wrap items-center gap-3">
+            {/* Narrow screens drop the title/date pair below the mood row so the
+                title keeps a usable width; desktop stays on one line. */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <div className="flex gap-1.5">
                 {MOODS.map((m) => (
                   <button
@@ -193,19 +195,21 @@ export default function DiaryPage() {
                   </button>
                 ))}
               </div>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="제목 (선택)"
-                className={`${INPUT} min-w-0 flex-1`}
-              />
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className={INPUT}
-              />
+              <div className="flex items-center gap-3 sm:min-w-0 sm:flex-1">
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="제목 (선택)"
+                  className={`${INPUT} min-w-0 flex-1`}
+                />
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className={`${INPUT} shrink-0`}
+                />
+              </div>
             </div>
             <textarea
               value={content}
