@@ -2,25 +2,54 @@
 
 :root {
   --background: #e2f9d1;
-  --foreground: #171717;
+  --background-top: #eefbe4;
+  --foreground: #1b2416;
+  --accent: #24490b;
+  --accent-hover: #2f5e0e;
+  --line: #9da19a;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* LifeOS keeps its light "sprout" identity in every OS theme, so no dark override. */
+body {
+  min-height: 100vh;
+  background: linear-gradient(
+    180deg,
+    var(--background-top) 0%,
+    var(--background) 42%
+  );
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Mascot idle float on the landing hero. */
+@keyframes lifeos-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+.animate-float {
+  animation: lifeos-float 4s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

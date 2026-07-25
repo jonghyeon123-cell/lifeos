@@ -43,24 +43,37 @@ export default function AuthPage() {
 
   return (
     <>
-      <header className="flex items-center justify-between px-8 pt-6">
-        <div className="flex items-center gap-5">
-          <Image src="/face.svg" alt="LifeOS logo" width={40} height={40} />
-          <span className="text-2xl font-bold">LifeOS</span>
+      <header className="flex items-center justify-between px-4 pt-4 sm:px-6 lg:px-8 lg:pt-6">
+        <div className="flex items-center gap-0">
+          <Image
+            src="/face.svg"
+            alt="LifeOS logo"
+            width={100}
+            height={100}
+            className="h-14 w-14 sm:h-20 sm:w-20 lg:h-[100px] lg:w-[100px]"
+          />
+          <Image
+            src="/LifeOS.png"
+            alt="LifeOS"
+            width={0}
+            height={0}
+            sizes="100vw"
+            className="h-16 w-auto sm:h-24 lg:h-40"
+          />
         </div>
 
         <Link
           href="/"
-          className="rounded-full px-4 py-2 text-[28px] font-medium text-gray-700 transition-colors hover:bg-gray-100"
+          className="rounded-full px-4 py-2 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100 sm:px-6 sm:py-3 sm:text-2xl lg:px-[38px] lg:py-[19px] lg:text-[67px]"
         >
           Home
         </Link>
       </header>
 
-      <hr className="mx-8 mt-[46px] border-t border-[#9da19a]" />
+      <hr className="mx-4 mt-[6px] border-t border-[#9da19a] sm:mx-6 lg:mx-8" />
 
-      <main className="relative flex flex-1 items-center justify-center overflow-hidden px-8 py-12 sm:justify-start sm:pl-16">
-        <div className="w-full max-w-sm translate-x-[70px] rounded-3xl border border-[#9da19a]/30 bg-white/70 p-10 backdrop-blur">
+      <main className="relative flex flex-1 flex-col items-center justify-center gap-10 px-4 py-10 sm:px-6 lg:flex-row lg:justify-start lg:gap-0 lg:overflow-hidden lg:py-12 lg:pl-16">
+        <div className="w-full max-w-sm rounded-3xl border border-[#9da19a]/30 bg-white/70 p-6 backdrop-blur sm:p-10 lg:translate-x-[70px]">
           <h1 className="text-center text-2xl font-bold">시작하기</h1>
           <p className="mt-2 text-center text-sm text-gray-600">
             LifeOS와 함께 하루를 정리해보세요
@@ -81,12 +94,13 @@ export default function AuthPage() {
           </p>
         </div>
 
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 sm:right-16">
+        <div className="lg:absolute lg:right-16 lg:top-1/2 lg:-translate-y-1/2">
           <Image
             src="/lifeos_charcter.png"
             alt="LifeOS character"
             width={714}
             height={714}
+            className="h-auto w-56 max-w-full sm:w-72 lg:w-[714px]"
             priority
           />
         </div>
