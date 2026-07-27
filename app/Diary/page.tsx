@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import PageHeader from "@/components/PageHeader";
 
 type DiaryEntry = {
   id: string;
@@ -125,31 +125,7 @@ export default function DiaryPage() {
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-0">
-          <Image
-            src="/face.svg"
-            alt="LifeOS logo"
-            width={90}
-            height={90}
-            className="h-12 w-12 sm:h-16 sm:w-16 lg:h-[90px] lg:w-[90px]"
-          />
-          <Image
-            src="/Diary.png"
-            alt="Diary"
-            width={0}
-            height={0}
-            sizes="100vw"
-            className="h-14 w-auto sm:h-24 lg:h-40"
-          />
-        </div>
-        <Link
-          href="/"
-          className="rounded-full px-4 py-2 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100 sm:px-6 sm:py-3 sm:text-xl lg:px-[38px] lg:py-[19px] lg:text-[34px]"
-        >
-          Home
-        </Link>
-      </div>
+      <PageHeader title="/mark-diary.png" alt="Diary" />
       <div className="relative">
         <hr className="mt-[10px] border-t border-[#9da19a]" />
         <Image

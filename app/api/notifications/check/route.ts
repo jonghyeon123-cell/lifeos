@@ -7,6 +7,14 @@ import {
   kstParts,
   type NotifSettings,
 } from "@/lib/notifications";
+import { weekStart } from "@/lib/date";
+import {
+  EMPTY_DATES,
+  HABIT_SELECT,
+  type Habit,
+  datesByHabit,
+  isDueToday,
+} from "@/lib/habits";
 
 export async function POST() {
   const supabase = await createClient();
@@ -22,6 +30,7 @@ export async function POST() {
   const [y, m] = today.split("-").map(Number);
   const lastDay = new Date(y, m, 0).getDate();
   const monthEnd = `${today.slice(0, 7)}-${String(lastDay).padStart(2, "0")}`;
+  const logsFrom = weekStart(today) < monthStart ? weekStart(today) : monthStart;
 
   // load settings (default if none)
   const { data: settingsRow } = await supabase
@@ -53,12 +62,19 @@ export async function POST() {
       .eq("user_id", user.id)
       .gte("entry_date", monthStart)
       .lte("entry_date", monthEnd),
-    supabase.from("daily_habits").select("id, title").eq("user_id", user.id),
+    supabase
+      .from("daily_habits")
+      .select(HABIT_SELECT)
+      .eq("user_id", user.id),
+    // weekly는 "이번 주에 몇 번 했나", monthly는 "이번 달에 했나"를 봐야 한다.
+    // 그래서 이번 주 시작과 이번 달 시작 중 이른 쪽부터 오늘까지를 가져온다
+    // (8월 1일처럼 주 시작이 지난달인 경우가 있다).
     supabase
       .from("daily_habit_logs")
       .select("habit_id, done_on")
       .eq("user_id", user.id)
-      .eq("done_on", today),
+      .gte("done_on", logsFrom)
+      .lte("done_on", today),
   ]);
 
   let income = 0;
@@ -69,12 +85,19 @@ export async function POST() {
     else expense += amt;
   }
 
-  const doneSet = new Set(
-    ((lRes.data as { habit_id: string }[]) ?? []).map((l) => l.habit_id)
+  // 오늘 노출 규칙은 홈 "오늘 할 일"과 같은 함수(isDueToday)를 쓴다. 알림에서만
+  // 다른 기준으로 재촉하면 화면과 알림이 어긋난다.
+  const logsByHabit = datesByHabit(
+    (lRes.data as { habit_id: string; done_on: string }[] | null) ?? []
   );
-  const habits = ((hRes.data as { id: string; title: string }[]) ?? []).map(
-    (h) => ({ title: h.title, doneToday: doneSet.has(h.id) })
-  );
+
+  const habits = ((hRes.data as Habit[] | null) ?? [])
+    .map((h) => ({ habit: h, dates: logsByHabit.get(h.id) ?? EMPTY_DATES }))
+    .filter(({ habit, dates }) => isDueToday(habit, dates, today))
+    .map(({ habit, dates }) => ({
+      title: habit.title,
+      satisfied: dates.has(today),
+    }));
 
   const goals = ((gRes.data as { id: string; title: string; due_date: string | null }[]) ?? []).map(
     (g) => ({ id: g.id, title: g.title, due_date: g.due_date })

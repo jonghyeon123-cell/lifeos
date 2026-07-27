@@ -37,7 +37,12 @@ type BuildInput = {
   }[];
   goals: { id: string; title: string; due_date: string | null }[];
   budget: { income: number; expense: number };
-  habits: { title: string; doneToday: boolean }[];
+  /**
+   * satisfied = 지금 더 할 게 없는 상태.
+   * daily는 오늘 체크했는가, weekly는 이번 주 목표 횟수를 채웠는가.
+   * 주 2회 습관을 이미 두 번 한 주의 남은 날까지 조르지 않기 위한 구분.
+   */
+  habits: { title: string; satisfied: boolean }[];
 };
 
 // ---- date helpers (KST) ----
@@ -126,7 +131,7 @@ export function buildCandidates(input: BuildInput): Candidate[] {
 
   // 4) today's habits (only after the reminder hour)
   if (settings.habit_reminder_enabled && hour >= settings.habit_reminder_hour) {
-    const undone = input.habits.filter((h) => !h.doneToday);
+    const undone = input.habits.filter((h) => !h.satisfied);
     if (undone.length > 0) {
       const names = undone.map((h) => h.title).join(", ");
       out.push({

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import { HomeLink, Mark, MascotMark } from "@/components/PageHeader";
 
 function GoogleIcon() {
   return (
@@ -44,30 +44,12 @@ export default function AuthPage() {
   return (
     <>
       <header className="flex items-center justify-between px-4 pt-4 sm:px-6 lg:px-8 lg:pt-6">
-        <div className="flex items-center gap-0">
-          <Image
-            src="/face.svg"
-            alt="LifeOS logo"
-            width={100}
-            height={100}
-            className="h-14 w-14 sm:h-20 sm:w-20 lg:h-[100px] lg:w-[100px]"
-          />
-          <Image
-            src="/LifeOS.png"
-            alt="LifeOS"
-            width={0}
-            height={0}
-            sizes="100vw"
-            className="h-16 w-auto sm:h-24 lg:h-40"
-          />
+        <div className="flex items-center gap-2 sm:gap-3">
+          <MascotMark />
+          <Mark src="/mark-lifeos.png" alt="LifeOS" />
         </div>
 
-        <Link
-          href="/"
-          className="rounded-full px-4 py-2 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100 sm:px-6 sm:py-3 sm:text-2xl lg:px-[38px] lg:py-[19px] lg:text-[67px]"
-        >
-          Home
-        </Link>
+        <HomeLink />
       </header>
 
       <hr className="mx-4 mt-[6px] border-t border-[#9da19a] sm:mx-6 lg:mx-8" />

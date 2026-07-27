@@ -1,122 +1,56 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import CheckButton from "@/components/CheckButton";
+import HabitCard from "@/components/HabitCard";
+import HabitForm from "@/components/HabitForm";
+import PageHeader, { AchievementLink } from "@/components/PageHeader";
+import ProgressBar from "@/components/ProgressBar";
+import { CARD, INPUT, PRIMARY_BTN } from "@/lib/ui";
+import {
+  GOAL_SELECT,
+  type Goal,
+  type GoalOption,
+  formatPct,
+  goalHref,
+  goalProgress,
+  groupByGoal,
+  isAchieved,
+  pendingCompletionWrites,
+  sortGoalOptions,
+  sortGoals,
+} from "@/lib/goals";
+import {
+  EMPTY_DATES,
+  HABIT_SELECT,
+  type Habit,
+  type HabitLog,
+  datesByHabit as buildDatesByHabit,
+} from "@/lib/habits";
+import { dueLabel, localDate, shiftDay } from "@/lib/date";
 
-type Task = { id: string; text: string; done: boolean };
+/** 진행률 계산에만 쓰이므로 과제 전체가 아니라 최소 필드만 가져온다. */
+type LinkedAssignment = { id: string; completed: boolean; goal_id: string | null };
 
-type Goal = {
-  id: string;
-  title: string;
-  memo: string | null;
-  tasks: Task[];
-  completed: boolean;
-  due_date: string | null;
-  created_at: string;
-};
-
-type DailyHabit = { id: string; title: string; created_at: string };
-type HabitLog = { habit_id: string; done_on: string };
-
-const CARD =
-  "bg-white/70 backdrop-blur border border-[#9da19a]/30 rounded-3xl shadow-[0_1px_3px_rgba(36,73,11,0.06)]";
-const INPUT =
-  "rounded-full border border-[#9da19a]/40 bg-white/80 px-4 py-2.5 text-sm outline-none focus:border-[#24490b]";
-const PRIMARY_BTN =
-  "flex-none whitespace-nowrap rounded-full border border-[#24490b] bg-[#e2f9d1] px-6 py-2.5 text-sm font-semibold text-[#24490b] transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24490b]/40 disabled:cursor-not-allowed disabled:opacity-40";
-
-const GOAL_SELECT = "id, title, memo, tasks, completed, due_date, created_at";
-const HABIT_SELECT = "id, title, created_at";
 const LOG_SELECT = "habit_id, done_on";
-const EMPTY_SET: Set<string> = new Set();
+const LINKED_SELECT = "id, completed, goal_id";
+const EMPTY_LINKED: LinkedAssignment[] = [];
+const EMPTY_HABITS: Habit[] = [];
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const localDate = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const shiftDay = (dateStr: string, delta: number) => {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return localDate(new Date(y, m - 1, d + delta));
-};
-
-function dueLabel(due: string | null) {
-  if (!due) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [y, m, d] = due.split("-").map(Number);
-  const target = new Date(y, m - 1, d);
-  const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000);
-  const text =
-    diff === 0 ? "D-day" : diff > 0 ? `D-${diff}` : `D+${Math.abs(diff)}`;
-  return { text, overdue: diff < 0, soon: diff >= 0 && diff <= 1 };
-}
-
-function normalizeGoals(rows: Goal[]) {
-  return rows
-    .map((r) => ({ ...r, tasks: Array.isArray(r.tasks) ? r.tasks : [] }))
-    .sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-      return b.created_at.localeCompare(a.created_at);
-    });
-}
-
-function progressOf(tasks: Task[]) {
-  const total = tasks.length;
-  const done = tasks.filter((t) => t.done).length;
-  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-  return { total, done, pct };
-}
-
-function currentStreak(set: Set<string>, today: string, yesterday: string) {
-  const anchor = set.has(today) ? today : set.has(yesterday) ? yesterday : null;
-  if (!anchor) return 0;
-  let n = 0;
-  let d = anchor;
-  while (set.has(d)) {
-    n++;
-    d = shiftDay(d, -1);
-  }
-  return n;
-}
-
-function bestStreak(set: Set<string>) {
-  const dates = [...set].sort();
-  let best = 0;
-  let cur = 0;
-  let prev: string | null = null;
-  for (const d of dates) {
-    cur = prev && shiftDay(prev, 1) === d ? cur + 1 : 1;
-    if (cur > best) best = cur;
-    prev = d;
-  }
-  return best;
-}
-
-function last7Days(set: Set<string>, today: string) {
-  const days: { date: string; done: boolean }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = shiftDay(today, -i);
-    days.push({ date: d, done: set.has(d) });
-  }
-  return days;
-}
-
-function FlameIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M12 2c1 3-1 4-2.5 5.5C8 9 7 10.5 7 13a5 5 0 0 0 10 0c0-2-1-3.5-2-5-1.5 1-2 .5-2-1 0-2-1-4-1-5Z" />
-    </svg>
-  );
-}
+type Loaded =
+  | { failed: true }
+  | {
+      failed: false;
+      goals: Goal[];
+      linked: LinkedAssignment[];
+      habits: Habit[];
+      logs: HabitLog[];
+    };
 
 export default function GoalPage() {
   const { user, loading } = useAuth();
@@ -127,88 +61,151 @@ export default function GoalPage() {
   const yesterday = shiftDay(today, -1);
 
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [habits, setHabits] = useState<DailyHabit[]>([]);
+  const [linked, setLinked] = useState<LinkedAssignment[]>([]);
+  const [habits, setHabits] = useState<Habit[]>([]);
   const [logs, setLogs] = useState<HabitLog[]>([]);
   const [fetching, setFetching] = useState(true);
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
-  const [habitTitle, setHabitTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  const logsByHabit = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const l of logs) {
-      let s = m.get(l.habit_id);
-      if (!s) {
-        s = new Set();
-        m.set(l.habit_id, s);
-      }
-      s.add(l.done_on);
+  const logsByHabit = useMemo(() => buildDatesByHabit(logs), [logs]);
+
+  // 목표마다 배열 전체를 훑는 대신 goal_id로 한 번만 묶는다.
+  const linkedByGoal = useMemo(() => groupByGoal(linked), [linked]);
+  const habitsByGoal = useMemo(() => groupByGoal(habits), [habits]);
+
+  const goalOptions = useMemo<GoalOption[]>(
+    () => sortGoalOptions(goals),
+    [goals]
+  );
+
+  // 목표별 진행률을 한 번만 구해 카드 렌더와 달성 판정이 같은 값을 쓰게 한다.
+  const progressByGoal = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof goalProgress>>();
+    for (const g of goals) {
+      m.set(
+        g.id,
+        goalProgress({
+          goal: g,
+          tasks: linkedByGoal.get(g.id),
+          habits: habitsByGoal.get(g.id),
+          datesByHabit: logsByHabit,
+          today,
+        })
+      );
     }
     return m;
-  }, [logs]);
+  }, [goals, linkedByGoal, habitsByGoal, logsByHabit, today]);
+
+  /** 달성한 목표는 여기서 빠지고 Achievement 페이지로 간다. */
+  const activeGoals = useMemo(
+    () =>
+      goals.filter((g) => !isAchieved(g, progressByGoal.get(g.id)?.pct ?? 0)),
+    [goals, progressByGoal]
+  );
+
+  // 진행률은 저장되지 않으므로, 계산 결과와 서버의 completed_at이 어긋나면 맞춰준다.
+  const pendingWrites = useMemo(
+    () =>
+      pendingCompletionWrites(
+        goals.map((g) => ({ goal: g, pct: progressByGoal.get(g.id)?.pct ?? 0 })),
+        today
+      ),
+    [goals, progressByGoal, today]
+  );
+
+  const applyCompletion = useCallback(
+    (writes: { id: string; completed_at: string | null }[]) => {
+      const byId = new Map(writes.map((w) => [w.id, w.completed_at]));
+      setGoals((prev) =>
+        prev.map((g) =>
+          byId.has(g.id) ? { ...g, completed_at: byId.get(g.id) ?? null } : g
+        )
+      );
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (pendingWrites.length === 0) return;
+    let ignore = false;
+    Promise.all(
+      pendingWrites.map((w) =>
+        supabase
+          .from("goals")
+          .update({ completed_at: w.completed_at })
+          .eq("id", w.id)
+      )
+    ).then((results) => {
+      if (ignore || results.some((r) => r.error)) return;
+      applyCompletion(pendingWrites);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [pendingWrites, supabase, applyCompletion]);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/auth");
   }, [loading, user, router]);
 
-  useEffect(() => {
-    if (!user) return;
-    let ignore = false;
-    Promise.all([
+  // 조회는 순수하게 데이터만 만들고, 상태 반영은 then 콜백에서 한다.
+  // (effect 본문에서 직접 setState 하면 cascading render가 된다)
+  const fetchAll = useCallback(async (): Promise<Loaded | null> => {
+    if (!user) return null;
+    const [g, a, h, l] = await Promise.all([
       supabase.from("goals").select(GOAL_SELECT).eq("user_id", user.id),
+      supabase
+        .from("assignments")
+        .select(LINKED_SELECT)
+        .eq("user_id", user.id)
+        .not("goal_id", "is", null),
       supabase.from("daily_habits").select(HABIT_SELECT).eq("user_id", user.id),
       supabase.from("daily_habit_logs").select(LOG_SELECT).eq("user_id", user.id),
-    ]).then(([g, h, l]) => {
-      if (ignore) return;
-      if (g.error || h.error || l.error) {
-        setError("데이터를 불러오지 못했어요.");
-      } else {
-        setGoals(normalizeGoals((g.data as Goal[]) ?? []));
-        setHabits(
-          ((h.data as DailyHabit[]) ?? []).sort((a, b) =>
-            a.created_at.localeCompare(b.created_at)
-          )
-        );
-        setLogs((l.data as HabitLog[]) ?? []);
-      }
-      setFetching(false);
+    ]);
+    if (g.error || a.error || h.error || l.error) return { failed: true };
+    return {
+      failed: false,
+      goals: sortGoals((g.data as Goal[]) ?? []),
+      linked: (a.data as LinkedAssignment[]) ?? [],
+      habits: ((h.data as Habit[]) ?? []).sort((x, y) =>
+        x.created_at.localeCompare(y.created_at)
+      ),
+      logs: (l.data as HabitLog[]) ?? [],
+    };
+  }, [supabase, user]);
+
+  const apply = useCallback((res: Loaded | null) => {
+    if (!res) return;
+    if (res.failed) {
+      setError("데이터를 불러오지 못했어요.");
+    } else {
+      setGoals(res.goals);
+      setLinked(res.linked);
+      setHabits(res.habits);
+      setLogs(res.logs);
+    }
+    setFetching(false);
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    fetchAll().then((res) => {
+      if (!ignore) apply(res);
     });
     return () => {
       ignore = true;
     };
-  }, [user, supabase]);
+  }, [fetchAll, apply]);
 
-  const reload = async () => {
-    if (!user) return;
-    const [g, h, l] = await Promise.all([
-      supabase.from("goals").select(GOAL_SELECT).eq("user_id", user.id),
-      supabase.from("daily_habits").select(HABIT_SELECT).eq("user_id", user.id),
-      supabase.from("daily_habit_logs").select(LOG_SELECT).eq("user_id", user.id),
-    ]);
-    if (!g.error) setGoals(normalizeGoals((g.data as Goal[]) ?? []));
-    if (!h.error)
-      setHabits(
-        ((h.data as DailyHabit[]) ?? []).sort((a, b) =>
-          a.created_at.localeCompare(b.created_at)
-        )
-      );
-    if (!l.error) setLogs((l.data as HabitLog[]) ?? []);
-  };
+  /** 낙관적 갱신이 실패했을 때 서버 상태로 되돌린다. */
+  const load = useCallback(() => {
+    fetchAll().then(apply);
+  }, [fetchAll, apply]);
 
   // ---- goals ----
-  const patchGoal = (id: string, patch: Partial<Goal>) =>
-    setGoals((prev) =>
-      normalizeGoals(prev.map((g) => (g.id === id ? { ...g, ...patch } : g)))
-    );
-
-  const persistTasks = async (id: string, tasks: Task[]) => {
-    const { error } = await supabase.from("goals").update({ tasks }).eq("id", id);
-    if (error) reload();
-  };
-
   const addGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = title.trim();
@@ -222,14 +219,13 @@ export default function GoalPage() {
         title: trimmed,
         memo: null,
         due_date: due || null,
-        tasks: [],
       })
       .select(GOAL_SELECT)
       .single();
     if (error || !data) {
       setError("추가하지 못했어요.");
     } else {
-      setGoals((prev) => normalizeGoals([data as Goal, ...prev]));
+      setGoals((prev) => sortGoals([data as Goal, ...prev]));
       setTitle("");
       setDue("");
     }
@@ -238,254 +234,129 @@ export default function GoalPage() {
 
   const removeGoal = async (goal: Goal) => {
     setGoals((prev) => prev.filter((g) => g.id !== goal.id));
+    // goal_id는 on delete set null이므로 연결된 과제는 독립 과제로 남는다.
+    setLinked((prev) => prev.filter((a) => a.goal_id !== goal.id));
     const { error } = await supabase.from("goals").delete().eq("id", goal.id);
-    if (error) reload();
+    if (error) load();
   };
 
   const toggleComplete = async (goal: Goal) => {
     const next = !goal.completed;
-    patchGoal(goal.id, { completed: next });
+    setGoals((prev) =>
+      sortGoals(
+        prev.map((g) => (g.id === goal.id ? { ...g, completed: next } : g))
+      )
+    );
     const { error } = await supabase
       .from("goals")
       .update({ completed: next })
       .eq("id", goal.id);
-    if (error) reload();
-  };
-
-  const addTask = (goal: Goal) => {
-    const text = (drafts[goal.id] ?? "").trim();
-    if (!text) return;
-    const tasks = [...goal.tasks, { id: crypto.randomUUID(), text, done: false }];
-    patchGoal(goal.id, { tasks });
-    setDrafts((d) => ({ ...d, [goal.id]: "" }));
-    persistTasks(goal.id, tasks);
-  };
-
-  const toggleTask = (goal: Goal, taskId: string) => {
-    const tasks = goal.tasks.map((t) =>
-      t.id === taskId ? { ...t, done: !t.done } : t
-    );
-    patchGoal(goal.id, { tasks });
-    persistTasks(goal.id, tasks);
-  };
-
-  const removeTask = (goal: Goal, taskId: string) => {
-    const tasks = goal.tasks.filter((t) => t.id !== taskId);
-    patchGoal(goal.id, { tasks });
-    persistTasks(goal.id, tasks);
+    if (error) load();
   };
 
   // ---- daily habits ----
-  const addHabit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = habitTitle.trim();
-    if (!trimmed || !user || saving) return;
-    setSaving(true);
-    setError(null);
-    const { data, error } = await supabase
+  const changeHabitGoal = async (habit: Habit, next: string) => {
+    const nextGoalId = next || null;
+    if (nextGoalId === habit.goal_id) return;
+    setHabits((prev) =>
+      prev.map((h) => (h.id === habit.id ? { ...h, goal_id: nextGoalId } : h))
+    );
+    const { error } = await supabase
       .from("daily_habits")
-      .insert({ user_id: user.id, title: trimmed })
-      .select(HABIT_SELECT)
-      .single();
-    if (error || !data) {
-      setError("추가하지 못했어요.");
-    } else {
-      setHabits((prev) => [...prev, data as DailyHabit]);
-      setHabitTitle("");
+      .update({ goal_id: nextGoalId })
+      .eq("id", habit.id);
+    if (error) {
+      setError("목표 연결을 바꾸지 못했어요.");
+      load();
     }
-    setSaving(false);
   };
 
-  const toggleHabit = async (habit: DailyHabit) => {
+  const toggleHabit = async (habit: Habit) => {
     if (!user) return;
-    const doneToday = (logsByHabit.get(habit.id) ?? EMPTY_SET).has(today);
+    const doneToday = (logsByHabit.get(habit.id) ?? EMPTY_DATES).has(today);
     if (doneToday) {
       setLogs((prev) =>
-        prev.filter(
-          (l) => !(l.habit_id === habit.id && l.done_on === today)
-        )
+        prev.filter((l) => !(l.habit_id === habit.id && l.done_on === today))
       );
       const { error } = await supabase
         .from("daily_habit_logs")
         .delete()
         .eq("habit_id", habit.id)
         .eq("done_on", today);
-      if (error) reload();
+      if (error) load();
     } else {
       setLogs((prev) => [...prev, { habit_id: habit.id, done_on: today }]);
       const { error } = await supabase
         .from("daily_habit_logs")
         .insert({ user_id: user.id, habit_id: habit.id, done_on: today });
-      if (error) reload();
+      if (error) load();
     }
   };
 
-  const removeHabit = async (habit: DailyHabit) => {
+  const removeHabit = async (habit: Habit) => {
     setHabits((prev) => prev.filter((h) => h.id !== habit.id));
     setLogs((prev) => prev.filter((l) => l.habit_id !== habit.id));
     const { error } = await supabase
       .from("daily_habits")
       .delete()
       .eq("id", habit.id);
-    if (error) reload();
+    if (error) load();
   };
 
   return (
     <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-0">
-          <Image
-            src="/face.svg"
-            alt="LifeOS logo"
-            width={90}
-            height={90}
-            className="h-12 w-12 sm:h-16 sm:w-16 lg:h-[90px] lg:w-[90px]"
-          />
-          <Image
-            src="/Goal.png"
-            alt="Goal"
-            width={0}
-            height={0}
-            sizes="100vw"
-            className="h-14 w-auto sm:h-24 lg:h-40"
-          />
-        </div>
-        <Link
-          href="/"
-          className="rounded-full px-4 py-2 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100 sm:px-6 sm:py-3 sm:text-xl lg:px-[38px] lg:py-[19px] lg:text-[34px]"
-        >
-          Home
-        </Link>
-      </div>
+      {/* Achievement는 목표 화면에서만 들어간다. 전체 메인 네비에는 넣지 않는다. */}
+      <PageHeader title="/mark-goal.png" alt="Goal">
+        <AchievementLink />
+      </PageHeader>
       <hr className="mt-[10px] border-t border-[#9da19a]" />
 
       {loading || !user ? (
         <p className="mt-10 text-sm text-gray-500">불러오는 중...</p>
       ) : (
         <div className="mx-auto mt-8 grid max-w-7xl grid-cols-1 items-start gap-8 lg:grid-cols-2">
-          {/* ── 매일 할 일 ── */}
+          {/* ── 습관 (매일 / 주 N회) ── */}
           <section>
             <h2 className="mb-4 flex items-center gap-2 text-base font-bold text-[#1b2416]">
-              매일 할 일
+              습관
               <span className="font-mono text-xs font-normal text-gray-400">
-                daily
+                habits
               </span>
             </h2>
 
-            <form onSubmit={addHabit} className={`${CARD} flex w-full gap-3 px-5 py-4`}>
-              <input
-                type="text"
-                value={habitTitle}
-                onChange={(e) => setHabitTitle(e.target.value)}
-                placeholder="매일 반복할 습관 (예: 30분 운동)"
-                className={`${INPUT} flex-1`}
-              />
-              <button
-                type="submit"
-                disabled={!habitTitle.trim() || saving}
-                className={PRIMARY_BTN}
-              >
-                추가
-              </button>
-            </form>
+            <HabitForm
+              goalOptions={goalOptions}
+              onCreated={(habit) => setHabits((prev) => [...prev, habit])}
+              onError={setError}
+            />
 
             <ul className="mt-4 flex flex-col gap-2.5">
               {habits.length === 0 ? (
                 <li
                   className={`${CARD} px-6 py-8 text-center text-sm text-gray-500`}
                 >
-                  매일 반복할 습관을 추가해보세요.
+                  반복할 습관을 추가해보세요. 매일도, 주 2회도 됩니다.
                 </li>
               ) : (
-                habits.map((h) => {
-                  const set = logsByHabit.get(h.id) ?? EMPTY_SET;
-                  const doneToday = set.has(today);
-                  const cur = currentStreak(set, today, yesterday);
-                  const best = bestStreak(set);
-                  const week = last7Days(set, today);
-                  return (
-                    <li
-                      key={h.id}
-                      className={`${CARD} flex flex-col gap-2.5 px-5 py-3.5 transition-shadow hover:shadow-[0_6px_20px_rgba(36,73,11,0.10)]`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleHabit(h)}
-                          aria-label={doneToday ? "오늘 완료 취소" : "오늘 완료"}
-                          aria-pressed={doneToday}
-                          className={`flex h-6 w-6 flex-none items-center justify-center rounded-full border-2 transition-colors ${
-                            doneToday
-                              ? "border-[#24490b] bg-[#24490b] text-white"
-                              : "border-[#9da19a]"
-                          }`}
-                        >
-                          {doneToday && (
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M20 6 9 17l-5-5" />
-                            </svg>
-                          )}
-                        </button>
-                        <span
-                          className={`flex-1 text-sm font-medium ${
-                            doneToday ? "text-gray-500" : "text-[#1b2416]"
-                          }`}
-                        >
-                          {h.title}
-                        </span>
-                        {cur > 0 ? (
-                          <span className="flex flex-none items-center gap-1 rounded-full bg-[#e2f9d1] px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-[#4d7c2f]">
-                            <FlameIcon />
-                            {cur}일
-                          </span>
-                        ) : (
-                          <span className="flex-none font-mono text-xs text-gray-400">
-                            시작 전
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removeHabit(h)}
-                          aria-label="습관 삭제"
-                          className="flex-none rounded-full px-1.5 text-gray-300 transition-colors hover:text-red-500"
-                        >
-                          ×
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-3 pl-9">
-                        <div
-                          className="flex gap-1.5"
-                          aria-label="최근 7일 기록"
-                        >
-                          {week.map((d, i) => (
-                            <span
-                              key={d.date}
-                              title={d.date}
-                              className={`h-3.5 w-3.5 rounded-[4px] ${
-                                d.done ? "bg-[#24490b]" : "bg-[#9da19a]/25"
-                              } ${i === 6 ? "ring-1 ring-[#24490b]/40" : ""}`}
-                            />
-                          ))}
-                        </div>
-                        {best > 0 && (
-                          <span className="ml-auto font-mono text-[11px] tabular-nums text-gray-400">
-                            최고 {best}일
-                          </span>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })
+                habits.map((h) => (
+                  <HabitCard
+                    key={h.id}
+                    habit={h}
+                    dates={logsByHabit.get(h.id) ?? EMPTY_DATES}
+                    today={today}
+                    yesterday={yesterday}
+                    goals={goalOptions}
+                    onToggle={toggleHabit}
+                    onChangeGoal={changeHabitGoal}
+                    onRemove={removeHabit}
+                    onUpdated={(next) =>
+                      setHabits((prev) =>
+                        prev.map((x) => (x.id === next.id ? next : x))
+                      )
+                    }
+                    onError={setError}
+                  />
+                ))
               )}
             </ul>
           </section>
@@ -531,7 +402,7 @@ export default function GoalPage() {
             <ul className="mt-4 flex flex-col gap-3">
               {fetching ? (
                 <li className="text-sm text-gray-500">불러오는 중...</li>
-              ) : goals.length === 0 ? (
+              ) : activeGoals.length === 0 ? (
                 <li
                   className={`${CARD} flex flex-col items-center gap-3 px-6 py-12 text-center`}
                 >
@@ -543,192 +414,132 @@ export default function GoalPage() {
                     className="opacity-80"
                   />
                   <p className="text-sm text-gray-500">
-                    아직 세운 목표가 없어요. 첫 목표를 심어보세요.
+                    {goals.length === 0
+                      ? "아직 세운 목표가 없어요. 첫 목표를 심어보세요."
+                      : "진행 중인 목표가 없어요. 달성한 목표는 Achievement에 있어요."}
                   </p>
                 </li>
               ) : (
-                goals.map((goal) => {
-                  const { total, done, pct } = progressOf(goal.tasks);
-                  const dl = dueLabel(goal.due_date);
-                  return (
-                    <li
-                      key={goal.id}
-                      className={`${CARD} px-5 py-4 ${
-                        goal.completed ? "opacity-60" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleComplete(goal)}
-                          aria-label={goal.completed ? "완료 취소" : "완료 표시"}
-                          className={`flex h-6 w-6 flex-none items-center justify-center rounded-full border-2 transition-colors ${
-                            goal.completed
-                              ? "border-[#24490b] bg-[#24490b] text-white"
-                              : "border-[#9da19a]"
-                          }`}
-                        >
-                          {goal.completed && (
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M20 6 9 17l-5-5" />
-                            </svg>
-                          )}
-                        </button>
-                        <p
-                          className={`min-w-0 flex-1 truncate text-sm font-semibold ${
-                            goal.completed
-                              ? "text-gray-500 line-through"
-                              : "text-[#1b2416]"
-                          }`}
-                        >
-                          {goal.title}
-                        </p>
-                        {dl && (
-                          <span
-                            className={`flex-none font-mono text-xs font-semibold tabular-nums ${
-                              goal.completed
-                                ? "text-gray-400"
-                                : dl.overdue
-                                  ? "text-red-600"
-                                  : dl.soon
-                                    ? "text-orange-500"
-                                    : "text-gray-500"
-                            }`}
-                          >
-                            {dl.text}
-                          </span>
-                        )}
-                        <span className="flex-none font-mono text-xs tabular-nums text-gray-500">
-                          {done}/{total} · {pct}%
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeGoal(goal)}
-                          aria-label="목표 삭제"
-                          className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                          </svg>
-                        </button>
-                      </div>
-
-                      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[#9da19a]/25">
-                        <div
-                          className="h-full rounded-full bg-[#24490b] transition-[width] duration-300"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-
-                      {goal.memo && (
-                        <p className="mt-3 text-sm text-gray-600">{goal.memo}</p>
-                      )}
-
-                      <ul className="mt-3 flex flex-col gap-1.5">
-                        {goal.tasks.map((t) => (
-                          <li key={t.id} className="flex items-center gap-2.5">
-                            <button
-                              type="button"
-                              onClick={() => toggleTask(goal, t.id)}
-                              aria-label={
-                                t.done ? "할 일 완료 취소" : "할 일 완료"
-                              }
-                              className={`flex flex-none items-center justify-center rounded-md border transition-colors ${
-                                t.done
-                                  ? "border-[#24490b] bg-[#24490b] text-white"
-                                  : "border-[#9da19a]"
-                              }`}
-                              style={{ height: 18, width: 18 }}
-                            >
-                              {t.done && (
-                                <svg
-                                  width="11"
-                                  height="11"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="3.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <path d="M20 6 9 17l-5-5" />
-                                </svg>
-                              )}
-                            </button>
-                            <span
-                              className={`flex-1 text-sm ${
-                                t.done
-                                  ? "text-gray-400 line-through"
-                                  : "text-gray-700"
-                              }`}
-                            >
-                              {t.text}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => removeTask(goal, t.id)}
-                              aria-label="할 일 삭제"
-                              className="flex-none rounded-full px-1.5 text-gray-300 transition-colors hover:text-red-500"
-                            >
-                              ×
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          addTask(goal);
-                        }}
-                        className="mt-2.5 flex items-center gap-2"
-                      >
-                        <input
-                          type="text"
-                          value={drafts[goal.id] ?? ""}
-                          onChange={(e) =>
-                            setDrafts((d) => ({
-                              ...d,
-                              [goal.id]: e.target.value,
-                            }))
-                          }
-                          placeholder="할 일 추가"
-                          className="flex-1 rounded-full border border-[#9da19a]/40 bg-white/70 px-3.5 py-1.5 text-xs outline-none focus:border-[#24490b]"
-                        />
-                        <button
-                          type="submit"
-                          disabled={!(drafts[goal.id] ?? "").trim()}
-                          className="flex-none rounded-full border border-[#9da19a]/50 px-3 py-1.5 text-xs font-semibold text-[#24490b] transition-colors hover:bg-[#e2f9d1] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          추가
-                        </button>
-                      </form>
-                    </li>
-                  );
-                })
+                activeGoals.map((goal) => (
+                  <GoalCard
+                    key={goal.id}
+                    goal={goal}
+                    linked={linkedByGoal.get(goal.id) ?? EMPTY_LINKED}
+                    habits={habitsByGoal.get(goal.id) ?? EMPTY_HABITS}
+                    datesByHabit={logsByHabit}
+                    today={today}
+                    onToggleComplete={toggleComplete}
+                    onRemove={removeGoal}
+                  />
+                ))
               )}
             </ul>
           </section>
         </div>
       )}
     </main>
+  );
+}
+
+function GoalCard({
+  goal,
+  linked,
+  habits,
+  datesByHabit,
+  today,
+  onToggleComplete,
+  onRemove,
+}: {
+  goal: Goal;
+  linked: LinkedAssignment[];
+  habits: Habit[];
+  datesByHabit: Map<string, Set<string>>;
+  today: string;
+  onToggleComplete: (goal: Goal) => void;
+  onRemove: (goal: Goal) => void;
+}) {
+  const { pct, mode, taskDone, taskTotal, habitTotal, itemTotal } = goalProgress({
+    goal,
+    tasks: linked,
+    habits,
+    datesByHabit,
+    today,
+  });
+  const dl = dueLabel(goal.due_date);
+  return (
+    <li className={`${CARD} px-5 py-4 ${goal.completed ? "opacity-60" : ""}`}>
+      <div className="flex items-center gap-3">
+        <CheckButton
+          checked={goal.completed}
+          onToggle={() => onToggleComplete(goal)}
+          label={goal.completed ? "완료 취소" : "완료 표시"}
+        />
+        <Link
+          href={goalHref(goal.seq)}
+          className={`min-w-0 flex-1 truncate text-sm font-semibold transition-colors hover:text-[#24490b] hover:underline ${
+            goal.completed ? "text-gray-500 line-through" : "text-[#1b2416]"
+          }`}
+        >
+          {goal.title}
+        </Link>
+        {dl && (
+          <span
+            className={`flex-none font-mono text-xs font-semibold tabular-nums ${
+              goal.completed
+                ? "text-gray-400"
+                : dl.overdue
+                  ? "text-red-600"
+                  : dl.soon
+                    ? "text-orange-500"
+                    : "text-gray-500"
+            }`}
+          >
+            {dl.text}
+          </span>
+        )}
+        <span className="flex-none font-mono text-xs tabular-nums text-gray-500">
+          {mode === "auto" ? `${formatPct(pct)}%` : `수동 ${formatPct(pct)}%`}
+        </span>
+        <button
+          type="button"
+          onClick={() => onRemove(goal)}
+          aria-label="목표 삭제"
+          className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="mt-3">
+        <ProgressBar pct={pct} label={`${goal.title} 진행률`} />
+      </div>
+
+      {goal.memo && <p className="mt-3 text-sm text-gray-600">{goal.memo}</p>}
+
+      <div className="mt-3 flex items-center justify-between">
+        <span className="font-mono text-xs text-gray-400">
+          {itemTotal === 0
+            ? "연결된 항목 없음"
+            : `과제 ${taskDone}/${taskTotal} · 습관 ${habitTotal}`}
+        </span>
+        <Link
+          href={goalHref(goal.seq)}
+          className="font-mono text-xs text-[#4d7c2f] transition-colors hover:text-[#24490b]"
+        >
+          상세 · 수정 →
+        </Link>
+      </div>
+    </li>
   );
 }

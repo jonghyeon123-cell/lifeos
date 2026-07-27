@@ -7,6 +7,27 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import NotificationCenter from "@/components/NotificationCenter";
+import CheckButton from "@/components/CheckButton";
+import ProgressBar from "@/components/ProgressBar";
+import { CARD } from "@/lib/ui";
+import {
+  ASSIGNMENT_SELECT,
+  type Assignment,
+  type ProgressMode,
+  goalHref,
+  goalProgress,
+  groupByGoal,
+  isAchieved,
+  sortAssignments,
+} from "@/lib/goals";
+import {
+  HABIT_SELECT,
+  type Habit,
+  currentStreak,
+  datesByHabit as buildDatesByHabit,
+  isDueToday,
+} from "@/lib/habits";
+import { dueLabel, localDate, pad, shiftDay } from "@/lib/date";
 
 // The four LifeOS features — sprout mascots cropped from public/Landing.png.
 // Drives both the signed-in header nav and the landing chips.
@@ -23,9 +44,6 @@ const FEATURES = [
   { href: "/Goal", label: "목표", img: "/sprout-goal.png", w: 368, h: 322 },
 ];
 
-const CARD =
-  "bg-white/70 backdrop-blur border border-[#9da19a]/30 rounded-3xl shadow-[0_1px_3px_rgba(36,73,11,0.06)]";
-
 const MOOD_SRC: Record<string, string> = {
   happy: "/emotion-happy.png",
   smile: "/emotion-smile.png",
@@ -33,39 +51,6 @@ const MOOD_SRC: Record<string, string> = {
   sad: "/emotion-sad.png",
   cry: "/emotion-cry.png",
 };
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const localDate = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const shiftDay = (s: string, delta: number) => {
-  const [y, m, d] = s.split("-").map(Number);
-  return localDate(new Date(y, m - 1, d + delta));
-};
-
-function dueLabel(due: string | null) {
-  if (!due) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [y, m, d] = due.split("-").map(Number);
-  const diff = Math.round(
-    (new Date(y, m - 1, d).getTime() - today.getTime()) / 86_400_000
-  );
-  const text =
-    diff === 0 ? "D-day" : diff > 0 ? `D-${diff}` : `D+${Math.abs(diff)}`;
-  return { text, overdue: diff < 0, soon: diff >= 0 && diff <= 1 };
-}
-
-function currentStreak(set: Set<string>, today: string, yesterday: string) {
-  const anchor = set.has(today) ? today : set.has(yesterday) ? yesterday : null;
-  if (!anchor) return 0;
-  let n = 0;
-  let cur = anchor;
-  while (set.has(cur)) {
-    n++;
-    cur = shiftDay(cur, -1);
-  }
-  return n;
-}
 
 function Won({ value }: { value: number }) {
   return (
@@ -94,9 +79,18 @@ type DashData = {
     mood: string | null;
     entry_date: string;
   } | null;
-  goals: { id: string; title: string; pct: number }[];
+  goals: {
+    id: string;
+    seq: number;
+    title: string;
+    pct: number;
+    taskDone: number;
+    taskTotal: number;
+    habitTotal: number;
+    mode: ProgressMode;
+  }[];
   goalCount: number;
-  habits: { id: string; title: string; dates: string[] }[];
+  habits: (Habit & { dates: string[] })[];
 };
 
 function Widget({
@@ -151,11 +145,11 @@ export default function Home() {
     const mEnd = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(lastDay)}`;
 
     Promise.all([
+      // 완료된 과제도 가져온다. 목표 진행률이 "완료/전체" 비율이라 분모가 필요하다.
       supabase
         .from("assignments")
-        .select("id, title, due_date, due_time, completed")
-        .eq("user_id", user.id)
-        .eq("completed", false),
+        .select(ASSIGNMENT_SELECT)
+        .eq("user_id", user.id),
       supabase
         .from("budget_entries")
         .select("type, amount")
@@ -171,9 +165,11 @@ export default function Home() {
         .limit(1),
       supabase
         .from("goals")
-        .select("id, title, tasks, completed")
+        .select(
+          "id, seq, title, completed, manual_progress, due_date, completed_at, created_at"
+        )
         .eq("user_id", user.id),
-      supabase.from("daily_habits").select("id, title").eq("user_id", user.id),
+      supabase.from("daily_habits").select(HABIT_SELECT).eq("user_id", user.id),
       supabase
         .from("daily_habit_logs")
         .select("habit_id, done_on")
@@ -181,23 +177,8 @@ export default function Home() {
     ]).then(([a, b, d, g, h, l]) => {
       if (ignore) return;
 
-      const inc = (
-        (a.data as {
-          id: string;
-          title: string;
-          due_date: string | null;
-          due_time: string | null;
-        }[]) ?? []
-      ).sort((x, y) => {
-        if (x.due_date && y.due_date) {
-          const c = x.due_date.localeCompare(y.due_date);
-          if (c !== 0) return c;
-          return (x.due_time ?? "99:99").localeCompare(y.due_time ?? "99:99");
-        }
-        if (x.due_date) return -1;
-        if (y.due_date) return 1;
-        return 0;
-      });
+      const allAssignments = (a.data as Assignment[]) ?? [];
+      const inc = sortAssignments(allAssignments.filter((x) => !x.completed));
 
       let income = 0;
       let expense = 0;
@@ -207,43 +188,46 @@ export default function Home() {
         else expense += amt;
       }
 
+      const logsByHabit = buildDatesByHabit(
+        (l.data as { habit_id: string; done_on: string }[] | null) ?? []
+      );
+      const habitRows = (h.data as Habit[]) ?? [];
+      // 주기 필드를 그대로 들고 간다. 오늘 노출 여부(isDueToday)가 이걸 본다.
+      const habits = habitRows.map((x) => ({
+        ...x,
+        dates: Array.from(logsByHabit.get(x.id) ?? []),
+      }));
+
       const goalsAll =
         (g.data as {
           id: string;
+          seq: number;
           title: string;
-          tasks: { done: boolean }[] | null;
           completed: boolean;
+          manual_progress: number;
+          due_date: string | null;
+          completed_at: string | null;
+          created_at: string;
         }[]) ?? [];
+      const linkedByGoal = groupByGoal(allAssignments);
+      const habitsByGoal = groupByGoal(habitRows);
       const gp = goalsAll
-        .filter((x) => !x.completed)
-        .map((x) => {
-          const tasks = Array.isArray(x.tasks) ? x.tasks : [];
-          const done = tasks.filter((t) => t.done).length;
-          return {
-            id: x.id,
-            title: x.title,
-            pct: tasks.length ? Math.round((done / tasks.length) * 100) : 0,
-          };
-        })
+        .map((x) => ({
+          id: x.id,
+          seq: x.seq,
+          title: x.title,
+          completed: x.completed,
+          ...goalProgress({
+            goal: x,
+            tasks: linkedByGoal.get(x.id),
+            habits: habitsByGoal.get(x.id),
+            datesByHabit: logsByHabit,
+            today,
+          }),
+        }))
+        // 달성한 목표는 Achievement 페이지로 간다. 대시보드는 진행 중인 것만.
+        .filter((x) => !isAchieved(x, x.pct))
         .sort((p, q) => q.pct - p.pct);
-
-      const logsByHabit = new Map<string, Set<string>>();
-      const logRows =
-        (l.data as { habit_id: string; done_on: string }[] | null) ?? [];
-      for (const lg of logRows) {
-        let s = logsByHabit.get(lg.habit_id);
-        if (!s) {
-          s = new Set();
-          logsByHabit.set(lg.habit_id, s);
-        }
-        s.add(lg.done_on);
-      }
-      const habits = (
-        (h.data as { id: string; title: string }[]) ?? []
-      ).map((x) => {
-        const s = logsByHabit.get(x.id) ?? new Set<string>();
-        return { id: x.id, title: x.title, dates: Array.from(s) };
-      });
 
       const diaryRow =
         (
@@ -270,7 +254,8 @@ export default function Home() {
     return () => {
       ignore = true;
     };
-  }, [user, supabase]);
+    // today는 YYYY-MM-DD 문자열이라 같은 날 동안은 값이 바뀌지 않는다.
+  }, [user, supabase, today]);
 
   const toggleToday = async (habit: { id: string; dates: string[] }) => {
     if (!user) return;
@@ -302,6 +287,21 @@ export default function Home() {
         .insert({ user_id: user.id, habit_id: habit.id, done_on: today });
     if (error) apply(base);
   };
+
+  /**
+   * 홈은 "오늘 해야 할 것"만 보여준다. 주기별 노출 규칙은 isDueToday가 정한다.
+   * 완료 여부·진행 상황·히트맵 같은 전체 정보는 /Goal의 습관 목록이 책임진다.
+   */
+  const dueHabits = dash
+    ? dash.habits
+      .map((h) => ({ habit: h, dateSet: new Set(h.dates) }))
+      .filter(({ habit, dateSet }) => isDueToday(habit, dateSet, today))
+    : [];
+
+  const dueDoneCount = dueHabits.reduce(
+    (n, { dateSet }) => (dateSet.has(today) ? n + 1 : n),
+    0
+  );
 
   // The landing stays pinned to one screen on desktop; mobile stacks and scrolls.
   const rootClass =
@@ -493,30 +493,38 @@ export default function Home() {
                   )}
                 </Widget>
 
-                {/* 목표 */}
+                {/* 목표 — 진행률 중심. 연결된 과제의 완료 비율이 그대로 진행률이다. */}
                 <Widget title="목표" href="/Goal">
                   {dash.goals.length === 0 ? (
                     <EmptyLine text="첫 목표를 심어보세요." />
                   ) : (
-                    <div className="flex flex-col gap-3">
-                      {dash.goals.map((g) => (
-                        <div key={g.id}>
-                          <div className="flex items-center justify-between gap-2 text-sm">
-                            <span className="min-w-0 flex-1 truncate text-gray-700">
-                              {g.title}
-                            </span>
-                            <span className="flex-none font-mono text-xs tabular-nums text-gray-500">
-                              {g.pct}%
-                            </span>
-                          </div>
-                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#9da19a]/25">
-                            <div
-                              className="h-full rounded-full bg-[#24490b]"
-                              style={{ width: `${g.pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-3">
+                        {dash.goals.map((g) => (
+                          <Link
+                            key={g.id}
+                            href={goalHref(g.seq)}
+                            className="group block"
+                          >
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                              <span className="min-w-0 flex-1 truncate text-gray-700 transition-colors group-hover:text-[#24490b]">
+                                {g.title}
+                              </span>
+                              <span className="flex-none text-right font-mono text-xs font-semibold tabular-nums text-[#4d7c2f]">
+                                목표율 {Math.round(g.pct)}%
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <ProgressBar
+                                pct={g.pct}
+                                className="h-1.5"
+                                label={`${g.title} 진행률`}
+                              />
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+
                       {dash.goalCount > 3 && (
                         <p className="text-xs text-gray-400">
                           +{dash.goalCount - 3}개 더
@@ -530,24 +538,19 @@ export default function Home() {
                 <Widget title="오늘 할 일" href="/Goal">
                   {dash.habits.length === 0 ? (
                     <EmptyLine text="매일 습관을 추가해보세요." />
+                  ) : dueHabits.length === 0 ? (
+                    <EmptyLine text="오늘 예정된 습관을 다 했어요." />
                   ) : (
                     <>
                       <p className="mb-2 font-mono text-sm tabular-nums text-gray-500">
-                        <b className="text-[#24490b]">
-                          {
-                            dash.habits.filter((h) =>
-                              (h.dates ?? []).includes(today)
-                            ).length
-                          }
-                        </b>
-                        /{dash.habits.length} 완료
+                        <b className="text-[#24490b]">{dueDoneCount}</b>
+                        /{dueHabits.length} 완료
                       </p>
                       <ul className="flex flex-col gap-1.5">
-                        {dash.habits.slice(0, 4).map((h) => {
-                          const dates = h.dates ?? [];
-                          const doneToday = dates.includes(today);
+                        {dueHabits.slice(0, 4).map(({ habit: h, dateSet }) => {
+                          const doneToday = dateSet.has(today);
                           const streak = currentStreak(
-                            new Set(dates),
+                            dateSet,
                             today,
                             yesterday
                           );
@@ -556,34 +559,15 @@ export default function Home() {
                               key={h.id}
                               className="flex items-center gap-2 text-sm"
                             >
-                              <button
-                                type="button"
-                                onClick={() => toggleToday(h)}
-                                aria-label={
+                              <CheckButton
+                                checked={doneToday}
+                                onToggle={() => toggleToday(h)}
+                                label={
                                   doneToday ? "오늘 완료 취소" : "오늘 완료"
                                 }
-                                aria-pressed={doneToday}
-                                style={{ height: 18, width: 18 }}
-                                className={`flex flex-none items-center justify-center rounded-full border transition-colors ${doneToday
-                                  ? "border-[#24490b] bg-[#24490b]"
-                                  : "border-[#9da19a] hover:border-[#24490b]"
-                                  }`}
-                              >
-                                {doneToday && (
-                                  <svg
-                                    width="10"
-                                    height="10"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="#fff"
-                                    strokeWidth="4"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <path d="M20 6 9 17l-5-5" />
-                                  </svg>
-                                )}
-                              </button>
+                                variant="sm-circle"
+                                pressed
+                              />
                               <span
                                 className={`min-w-0 flex-1 truncate ${doneToday ? "text-gray-400" : "text-gray-700"
                                   }`}
