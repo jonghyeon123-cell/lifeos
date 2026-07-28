@@ -17,7 +17,7 @@ import {
   type Habit,
   currentWeekDays,
   habitStats,
-  monthCells,
+  monthCell,
   weekSlots,
   weekdayLabel,
 } from "@/lib/habits";
@@ -36,7 +36,7 @@ function FlameIcon() {
   );
 }
 
-export function frequencyLabel(
+function frequencyLabel(
   h: Pick<
     Habit,
     "frequency_type" | "frequency_count" | "scheduled_day_of_month"
@@ -87,7 +87,7 @@ export default function HabitCard({
   const week = weekly || monthly ? [] : currentWeekDays(dates, today);
   const slots = weekly ? weekSlots(habit, dates, today) : [];
   // 월간은 이번 달 한 칸만 본다. 지난 달들은 카드에서 굳이 늘어놓지 않는다.
-  const thisMonth = monthly ? monthCells(habit, dates, today, 1)[0] : null;
+  const thisMonth = monthly ? monthCell(habit, dates, today) : null;
   const nextDue = monthly ? dueLabel(stats.nextDue) : null;
 
   const unit = monthly ? "개월" : weekly ? "주" : "일";
@@ -113,7 +113,9 @@ export default function HabitCard({
     <li
       className={`${CARD} flex flex-col gap-2.5 px-5 py-3.5 transition-shadow hover:shadow-[0_6px_20px_rgba(36,73,11,0.10)]`}
     >
-      <div className="flex items-center gap-3">
+      {/* 좁은 화면에서는 뱃지·버튼 묶음이 아래 줄로 내려간다. 한 줄에 다 두면
+          제목이 min-w-0로 0까지 줄어 읽을 수 없다. sm 이상은 지금 그대로 한 줄. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:flex-nowrap">
         <CheckButton
           checked={stats.doneToday}
           onToggle={() => onToggle(habit)}
@@ -128,44 +130,46 @@ export default function HabitCard({
           {habit.title}
         </span>
 
-        <span className="flex-none rounded-full border border-[#9da19a]/40 px-2 py-0.5 font-mono text-[11px] text-gray-500">
-          {frequencyLabel(habit)}
-        </span>
-
-        {stats.streak > 0 ? (
-          <span className="flex flex-none items-center gap-1 rounded-full bg-[#e2f9d1] px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-[#4d7c2f]">
-            <FlameIcon />
-            {stats.streak}
-            {unit}
+        <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+          <span className="flex-none rounded-full border border-[#9da19a]/40 px-2 py-0.5 font-mono text-[11px] text-gray-500">
+            {frequencyLabel(habit)}
           </span>
-        ) : (
-          <span className="flex-none font-mono text-xs text-gray-400">
-            시작 전
-          </span>
-        )}
 
-        {onUpdated ? (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            aria-label={`${habit.title} 수정`}
-            title="이름·주기 수정"
-            className="flex-none rounded-full p-1 text-gray-400 transition-colors hover:text-[#24490b]"
-          >
-            <PencilIcon />
-          </button>
-        ) : null}
+          {stats.streak > 0 ? (
+            <span className="flex flex-none items-center gap-1 rounded-full bg-[#e2f9d1] px-2.5 py-1 font-mono text-xs font-bold tabular-nums text-[#4d7c2f]">
+              <FlameIcon />
+              {stats.streak}
+              {unit}
+            </span>
+          ) : (
+            <span className="flex-none font-mono text-xs text-gray-400">
+              시작 전
+            </span>
+          )}
 
-        {onRemove ? (
-          <button
-            type="button"
-            onClick={() => onRemove(habit)}
-            aria-label="습관 삭제"
-            className="flex-none rounded-full px-1.5 text-gray-300 transition-colors hover:text-red-500"
-          >
-            ×
-          </button>
-        ) : null}
+          {onUpdated ? (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              aria-label={`${habit.title} 수정`}
+              title="이름·주기 수정"
+              className="flex-none rounded-full p-1 text-gray-400 transition-colors hover:text-[#24490b]"
+            >
+              <PencilIcon />
+            </button>
+          ) : null}
+
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={() => onRemove(habit)}
+              aria-label="습관 삭제"
+              className="flex-none rounded-full px-1.5 text-gray-300 transition-colors hover:text-red-500"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pl-9">

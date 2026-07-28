@@ -53,6 +53,14 @@ export const monthKey = (dateStr: string) => dateStr.slice(0, 7);
 export const daysInMonth = (year: number, month: number) =>
   new Date(year, month, 0).getDate();
 
+/** 그 달의 1일~말일. entry_date 범위 필터에 그대로 넣는다. month는 1~12. */
+export function monthRange(year: number, month: number) {
+  return {
+    start: `${year}-${pad(month)}-01`,
+    end: `${year}-${pad(month)}-${pad(daysInMonth(year, month))}`,
+  };
+}
+
 /**
  * "매달 N일"을 그 달의 실제 날짜로 옮긴다.
  *

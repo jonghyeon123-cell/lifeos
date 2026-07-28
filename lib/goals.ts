@@ -6,7 +6,8 @@
 //
 // 목표는 더 이상 자체 할 일 목록(구 goals.tasks jsonb)을 갖지 않는다.
 
-import { dateOf, laterDate } from "@/lib/date";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { dateOf, laterDate, localDate } from "@/lib/date";
 import {
   EMPTY_DATES,
   type Habit,
@@ -134,6 +135,55 @@ export function pendingCompletionWrites(
     }
   }
   return writes;
+}
+
+/**
+ * 과제 완료 토글. 과제 목록과 목표 상세가 같은 문장을 쓴다.
+ * completed_at은 주간 요약의 "이번 주 완료한 과제"가 보는 값이라 함께 맞춘다.
+ */
+export async function setAssignmentCompleted(
+  supabase: SupabaseClient,
+  id: string,
+  completed: boolean
+) {
+  const { error } = await supabase
+    .from("assignments")
+    .update({
+      completed,
+      completed_at: completed ? localDate(new Date()) : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  return error;
+}
+
+/**
+ * 오늘의 진행률을 goal_progress_snapshots에 남긴다. 주간 요약의 "지난주 대비"가
+ * 이 기록을 본다 — 진행률은 DB에 없고 화면이 계산할 때만 존재하기 때문이다.
+ *
+ * 크론이 아니라 화면이 쓴다. 홈과 /Goal이 이미 전 목표의 진행률을 들고 있어서
+ * 그대로 upsert 하면 끝이고, 그날 앱을 안 열면 그날 점이 없는 건 요약 쪽에서
+ * "7일 전 이전의 가장 최근 점"을 찾는 것으로 견딘다.
+ *
+ * 실패는 삼킨다. 하루치 점 하나가 빠질 뿐이고, 화면이 이것 때문에 멈추면 안 된다.
+ */
+export async function saveProgressSnapshot(
+  supabase: SupabaseClient,
+  userId: string,
+  today: string,
+  entries: readonly { goalId: string; pct: number }[]
+) {
+  if (entries.length === 0) return;
+  await supabase.from("goal_progress_snapshots").upsert(
+    entries.map((e) => ({
+      goal_id: e.goalId,
+      user_id: userId,
+      taken_on: today,
+      // 컬럼이 numeric(6,3)이라 넘기기 전에 같은 자리수로 맞춘다.
+      progress: Math.round(Math.min(100, Math.max(0, e.pct)) * 1000) / 1000,
+    })),
+    { onConflict: "goal_id,taken_on" }
+  );
 }
 
 /** "2026.08.15 달성" 형태. completed_at은 date 컬럼이라 그대로 쓴다. */

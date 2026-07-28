@@ -1,27 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import CheckButton from "@/components/CheckButton";
+import EmptyCard from "@/components/EmptyCard";
 import HabitCard from "@/components/HabitCard";
 import HabitForm from "@/components/HabitForm";
 import PageHeader, { AchievementLink } from "@/components/PageHeader";
 import ProgressBar from "@/components/ProgressBar";
+import TrashButton from "@/components/TrashButton";
 import { CARD, INPUT, PRIMARY_BTN } from "@/lib/ui";
 import {
   GOAL_SELECT,
   type Goal,
   type GoalOption,
+  type GoalProgress,
   formatPct,
   goalHref,
   goalProgress,
   groupByGoal,
   isAchieved,
   pendingCompletionWrites,
+  saveProgressSnapshot,
   sortGoalOptions,
   sortGoals,
 } from "@/lib/goals";
@@ -31,6 +33,8 @@ import {
   type Habit,
   type HabitLog,
   datesByHabit as buildDatesByHabit,
+  sortHabits,
+  writeHabitLog,
 } from "@/lib/habits";
 import { dueLabel, localDate, shiftDay } from "@/lib/date";
 
@@ -39,8 +43,6 @@ type LinkedAssignment = { id: string; completed: boolean; goal_id: string | null
 
 const LOG_SELECT = "habit_id, done_on";
 const LINKED_SELECT = "id, completed, goal_id";
-const EMPTY_LINKED: LinkedAssignment[] = [];
-const EMPTY_HABITS: Habit[] = [];
 
 type Loaded =
   | { failed: true }
@@ -53,8 +55,7 @@ type Loaded =
     };
 
 export default function GoalPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const supabase = useMemo(() => createClient(), []);
 
   const today = localDate(new Date());
@@ -83,7 +84,7 @@ export default function GoalPage() {
 
   // 목표별 진행률을 한 번만 구해 카드 렌더와 달성 판정이 같은 값을 쓰게 한다.
   const progressByGoal = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof goalProgress>>();
+    const m = new Map<string, GoalProgress>();
     for (const g of goals) {
       m.set(
         g.id,
@@ -147,9 +148,17 @@ export default function GoalPage() {
     };
   }, [pendingWrites, supabase, applyCompletion]);
 
+  // 오늘의 진행률을 남긴다. 홈도 같은 일을 하므로 어느 쪽을 열든 그날 점이 생긴다.
+  // 체크를 토글하면 진행률이 바뀌므로 다시 쓴다 — 그날의 마지막 값이 남는다.
   useEffect(() => {
-    if (!loading && !user) router.replace("/auth");
-  }, [loading, user, router]);
+    if (!user || fetching) return;
+    saveProgressSnapshot(
+      supabase,
+      user.id,
+      today,
+      [...progressByGoal].map(([goalId, p]) => ({ goalId, pct: p.pct }))
+    );
+  }, [user, supabase, today, fetching, progressByGoal]);
 
   // 조회는 순수하게 데이터만 만들고, 상태 반영은 then 콜백에서 한다.
   // (effect 본문에서 직접 setState 하면 cascading render가 된다)
@@ -170,9 +179,7 @@ export default function GoalPage() {
       failed: false,
       goals: sortGoals((g.data as Goal[]) ?? []),
       linked: (a.data as LinkedAssignment[]) ?? [],
-      habits: ((h.data as Habit[]) ?? []).sort((x, y) =>
-        x.created_at.localeCompare(y.created_at)
-      ),
+      habits: sortHabits((h.data as Habit[]) ?? []),
       logs: (l.data as HabitLog[]) ?? [],
     };
   }, [supabase, user]);
@@ -273,24 +280,19 @@ export default function GoalPage() {
 
   const toggleHabit = async (habit: Habit) => {
     if (!user) return;
-    const doneToday = (logsByHabit.get(habit.id) ?? EMPTY_DATES).has(today);
-    if (doneToday) {
-      setLogs((prev) =>
-        prev.filter((l) => !(l.habit_id === habit.id && l.done_on === today))
-      );
-      const { error } = await supabase
-        .from("daily_habit_logs")
-        .delete()
-        .eq("habit_id", habit.id)
-        .eq("done_on", today);
-      if (error) load();
-    } else {
-      setLogs((prev) => [...prev, { habit_id: habit.id, done_on: today }]);
-      const { error } = await supabase
-        .from("daily_habit_logs")
-        .insert({ user_id: user.id, habit_id: habit.id, done_on: today });
-      if (error) load();
-    }
+    const wasDone = (logsByHabit.get(habit.id) ?? EMPTY_DATES).has(today);
+    setLogs((prev) =>
+      wasDone
+        ? prev.filter((l) => !(l.habit_id === habit.id && l.done_on === today))
+        : [...prev, { habit_id: habit.id, done_on: today }]
+    );
+    const error = await writeHabitLog(supabase, {
+      userId: user.id,
+      habitId: habit.id,
+      date: today,
+      wasDone,
+    });
+    if (error) load();
   };
 
   const removeHabit = async (habit: Habit) => {
@@ -403,31 +405,17 @@ export default function GoalPage() {
               {fetching ? (
                 <li className="text-sm text-gray-500">불러오는 중...</li>
               ) : activeGoals.length === 0 ? (
-                <li
-                  className={`${CARD} flex flex-col items-center gap-3 px-6 py-12 text-center`}
-                >
-                  <Image
-                    src="/face.svg"
-                    alt=""
-                    width={56}
-                    height={56}
-                    className="opacity-80"
-                  />
-                  <p className="text-sm text-gray-500">
-                    {goals.length === 0
-                      ? "아직 세운 목표가 없어요. 첫 목표를 심어보세요."
-                      : "진행 중인 목표가 없어요. 달성한 목표는 Achievement에 있어요."}
-                  </p>
-                </li>
+                <EmptyCard>
+                  {goals.length === 0
+                    ? "아직 세운 목표가 없어요. 첫 목표를 심어보세요."
+                    : "진행 중인 목표가 없어요. 달성한 목표는 Achievement에 있어요."}
+                </EmptyCard>
               ) : (
                 activeGoals.map((goal) => (
                   <GoalCard
                     key={goal.id}
                     goal={goal}
-                    linked={linkedByGoal.get(goal.id) ?? EMPTY_LINKED}
-                    habits={habitsByGoal.get(goal.id) ?? EMPTY_HABITS}
-                    datesByHabit={logsByHabit}
-                    today={today}
+                    progress={progressByGoal.get(goal.id)!}
                     onToggleComplete={toggleComplete}
                     onRemove={removeGoal}
                   />
@@ -443,28 +431,17 @@ export default function GoalPage() {
 
 function GoalCard({
   goal,
-  linked,
-  habits,
-  datesByHabit,
-  today,
+  progress,
   onToggleComplete,
   onRemove,
 }: {
   goal: Goal;
-  linked: LinkedAssignment[];
-  habits: Habit[];
-  datesByHabit: Map<string, Set<string>>;
-  today: string;
+  /** 페이지가 한 번만 계산해 넘긴다. 카드가 다시 구하면 같은 일을 두 번 한다. */
+  progress: GoalProgress;
   onToggleComplete: (goal: Goal) => void;
   onRemove: (goal: Goal) => void;
 }) {
-  const { pct, mode, taskDone, taskTotal, habitTotal, itemTotal } = goalProgress({
-    goal,
-    tasks: linked,
-    habits,
-    datesByHabit,
-    today,
-  });
+  const { pct, mode, taskDone, taskTotal, habitTotal, itemTotal } = progress;
   const dl = dueLabel(goal.due_date);
   return (
     <li className={`${CARD} px-5 py-4 ${goal.completed ? "opacity-60" : ""}`}>
@@ -500,25 +477,7 @@ function GoalCard({
         <span className="flex-none font-mono text-xs tabular-nums text-gray-500">
           {mode === "auto" ? `${formatPct(pct)}%` : `수동 ${formatPct(pct)}%`}
         </span>
-        <button
-          type="button"
-          onClick={() => onRemove(goal)}
-          aria-label="목표 삭제"
-          className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-          </svg>
-        </button>
+        <TrashButton onClick={() => onRemove(goal)} label="목표 삭제" />
       </div>
 
       <div className="mt-3">

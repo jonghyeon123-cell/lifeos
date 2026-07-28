@@ -21,7 +21,6 @@ export default function FrequencyPicker({
   onToggleDay,
   dayOfMonth,
   onDayOfMonthChange,
-  selectClassName = "sm:w-28",
 }: {
   frequency: string;
   onFrequencyChange: (value: string) => void;
@@ -29,7 +28,6 @@ export default function FrequencyPicker({
   onToggleDay: (weekday: number) => void;
   dayOfMonth: number;
   onDayOfMonthChange: (day: number) => void;
-  selectClassName?: string;
 }) {
   const { frequency_type, frequency_count } = parseFrequency(frequency);
   const isWeekly = frequency_type === "weekly";
@@ -47,7 +45,7 @@ export default function FrequencyPicker({
         value={frequency}
         onChange={(e) => onFrequencyChange(e.target.value)}
         aria-label="반복 주기"
-        className={`${INPUT} ${selectClassName}`}
+        className={`${INPUT} sm:w-28`}
       >
         {FREQUENCY_OPTIONS.map((f) => (
           <option key={f.value} value={f.value}>

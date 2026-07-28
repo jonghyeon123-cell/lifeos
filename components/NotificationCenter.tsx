@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_SETTINGS,
+  NOTIF_SETTINGS_SELECT,
+  type NotifSettings,
+} from "@/lib/notifications";
 
 type Notif = {
   id: string;
@@ -13,22 +18,9 @@ type Notif = {
   created_at: string;
 };
 
-type Settings = {
-  assignment_days: number[];
-  goal_days: number[];
-  habit_reminder_enabled: boolean;
-  habit_reminder_hour: number;
-  budget_monthend_enabled: boolean;
-};
+const NOTIF_SELECT = "id, kind, title, body, read, created_at";
 
-const DEFAULTS: Settings = {
-  assignment_days: [5, 3, 1, 0],
-  goal_days: [30, 10, 1],
-  habit_reminder_enabled: true,
-  habit_reminder_hour: 22,
-  budget_monthend_enabled: true,
-};
-
+// 목록용 입력은 패널 폭에 맞춰 lib/ui의 INPUT보다 좁다.
 const INPUT =
   "rounded-full border border-[#9da19a]/40 bg-white/80 px-3.5 py-2 text-sm outline-none focus:border-[#24490b]";
 
@@ -59,48 +51,50 @@ export default function NotificationCenter() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"list" | "settings">("list");
   const [items, setItems] = useState<Notif[]>([]);
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
-  const [assignStr, setAssignStr] = useState("5, 3, 1, 0");
-  const [goalStr, setGoalStr] = useState("30, 10, 1");
+  const [settings, setSettings] = useState<NotifSettings>(DEFAULT_SETTINGS);
+  const [assignStr, setAssignStr] = useState(
+    DEFAULT_SETTINGS.assignment_days.join(", ")
+  );
+  const [goalStr, setGoalStr] = useState(
+    DEFAULT_SETTINGS.goal_days.join(", ")
+  );
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   const unread = items.filter((i) => !i.read).length;
 
-  const loadNotifs = useCallback(async () => {
-    if (!user) return;
+  const fetchNotifs = useCallback(async () => {
+    if (!user) return null;
     const { data } = await supabase
       .from("notifications")
-      .select("id, kind, title, body, read, created_at")
+      .select(NOTIF_SELECT)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(50);
-    setItems((data as Notif[]) ?? []);
+    return (data as Notif[]) ?? [];
   }, [supabase, user]);
+
+  const loadNotifs = useCallback(async () => {
+    const rows = await fetchNotifs();
+    if (rows) setItems(rows);
+  }, [fetchNotifs]);
 
   useEffect(() => {
     if (!user) return;
     let ignore = false;
     Promise.all([
-      supabase
-        .from("notifications")
-        .select("id, kind, title, body, read, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50),
+      fetchNotifs(),
       supabase
         .from("notification_settings")
-        .select(
-          "assignment_days, goal_days, habit_reminder_enabled, habit_reminder_hour, budget_monthend_enabled"
-        )
+        .select(NOTIF_SETTINGS_SELECT)
         .eq("user_id", user.id)
         .maybeSingle(),
-    ]).then(([n, s]) => {
+    ]).then(([rows, s]) => {
       if (ignore) return;
-      setItems((n.data as Notif[]) ?? []);
+      setItems(rows ?? []);
       if (s.data) {
-        const st = s.data as Settings;
+        const st = s.data as NotifSettings;
         setSettings(st);
         setAssignStr(st.assignment_days.join(", "));
         setGoalStr(st.goal_days.join(", "));
@@ -109,7 +103,7 @@ export default function NotificationCenter() {
     return () => {
       ignore = true;
     };
-  }, [user, supabase]);
+  }, [user, supabase, fetchNotifs]);
 
   const openPanel = async () => {
     setOpen(true);
@@ -152,7 +146,7 @@ export default function NotificationCenter() {
     if (!user || saving) return;
     setSaving(true);
     setNote(null);
-    const next: Settings = {
+    const next: NotifSettings = {
       assignment_days: parseDays(assignStr),
       goal_days: parseDays(goalStr),
       habit_reminder_enabled: settings.habit_reminder_enabled,

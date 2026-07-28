@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,16 +8,26 @@ import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import NotificationCenter from "@/components/NotificationCenter";
 import CheckButton from "@/components/CheckButton";
+import CountUp from "@/components/CountUp";
 import ProgressBar from "@/components/ProgressBar";
+import Won from "@/components/Won";
+import {
+  type WeeklySummary,
+  loadWeeklySummary,
+  signedPp,
+} from "@/lib/summary";
 import { CARD } from "@/lib/ui";
 import {
   ASSIGNMENT_SELECT,
   type Assignment,
+  GOAL_SELECT,
+  type Goal,
   type ProgressMode,
   goalHref,
   goalProgress,
   groupByGoal,
   isAchieved,
+  saveProgressSnapshot,
   sortAssignments,
 } from "@/lib/goals";
 import {
@@ -26,8 +36,10 @@ import {
   currentStreak,
   datesByHabit as buildDatesByHabit,
   isDueToday,
+  writeHabitLog,
 } from "@/lib/habits";
-import { dueLabel, localDate, pad, shiftDay } from "@/lib/date";
+import { dueLabel, localDate, monthRange, shiftDay } from "@/lib/date";
+import { MOOD_SRC } from "@/lib/moods";
 
 // The four LifeOS features — sprout mascots cropped from public/Landing.png.
 // Drives both the signed-in header nav and the landing chips.
@@ -44,24 +56,14 @@ const FEATURES = [
   { href: "/Goal", label: "목표", img: "/sprout-goal.png", w: 368, h: 322 },
 ];
 
-const MOOD_SRC: Record<string, string> = {
-  happy: "/emotion-happy.png",
-  smile: "/emotion-smile.png",
-  neutral: "/emotion-neutral.png",
-  sad: "/emotion-sad.png",
-  cry: "/emotion-cry.png",
+// 요약은 로그인 후 네비에만 둔다. 랜딩 칩 줄은 네 개 폭에 맞춰져 있어 건드리지 않는다.
+const SUMMARY_FEATURE = {
+  href: "/Summary",
+  label: "요약",
+  img: "/sprout-summary.png",
+  w: 603,
+  h: 636,
 };
-
-function Won({ value }: { value: number }) {
-  return (
-    <>
-      <span className="mr-0.5 align-[0.05em] text-[0.7em] font-normal opacity-70">
-        ₩
-      </span>
-      {new Intl.NumberFormat("ko-KR").format(value)}
-    </>
-  );
-}
 
 type DashData = {
   assignments: {
@@ -70,7 +72,6 @@ type DashData = {
     due_date: string | null;
     due_time: string | null;
   }[];
-  assignmentCount: number;
   income: number;
   expense: number;
   diary: {
@@ -89,7 +90,6 @@ type DashData = {
     habitTotal: number;
     mode: ProgressMode;
   }[];
-  goalCount: number;
   habits: (Habit & { dates: string[] })[];
 };
 
@@ -127,6 +127,7 @@ export default function Home() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [dash, setDash] = useState<DashData | null>(null);
+  const [summary, setSummary] = useState<WeeklySummary | null>(null);
 
   const today = localDate(new Date());
   const yesterday = shiftDay(today, -1);
@@ -140,9 +141,10 @@ export default function Home() {
     if (!user) return;
     let ignore = false;
     const now = new Date();
-    const mStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const mEnd = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(lastDay)}`;
+    const { start: mStart, end: mEnd } = monthRange(
+      now.getFullYear(),
+      now.getMonth() + 1
+    );
 
     Promise.all([
       // 완료된 과제도 가져온다. 목표 진행률이 "완료/전체" 비율이라 분모가 필요하다.
@@ -163,12 +165,7 @@ export default function Home() {
         .order("entry_date", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1),
-      supabase
-        .from("goals")
-        .select(
-          "id, seq, title, completed, manual_progress, due_date, completed_at, created_at"
-        )
-        .eq("user_id", user.id),
+      supabase.from("goals").select(GOAL_SELECT).eq("user_id", user.id),
       supabase.from("daily_habits").select(HABIT_SELECT).eq("user_id", user.id),
       supabase
         .from("daily_habit_logs")
@@ -198,17 +195,7 @@ export default function Home() {
         dates: Array.from(logsByHabit.get(x.id) ?? []),
       }));
 
-      const goalsAll =
-        (g.data as {
-          id: string;
-          seq: number;
-          title: string;
-          completed: boolean;
-          manual_progress: number;
-          due_date: string | null;
-          completed_at: string | null;
-          created_at: string;
-        }[]) ?? [];
+      const goalsAll = (g.data as Goal[]) ?? [];
       const linkedByGoal = groupByGoal(allAssignments);
       const habitsByGoal = groupByGoal(habitRows);
       const gp = goalsAll
@@ -225,9 +212,15 @@ export default function Home() {
             today,
           }),
         }))
-        // 달성한 목표는 Achievement 페이지로 간다. 대시보드는 진행 중인 것만.
-        .filter((x) => !isAchieved(x, x.pct))
         .sort((p, q) => q.pct - p.pct);
+
+      // 오늘의 진행률을 남긴다. 달성분까지 전부 — 주간 비교는 달성한 목표도 본다.
+      saveProgressSnapshot(
+        supabase,
+        user.id,
+        today,
+        gp.map((x) => ({ goalId: x.id, pct: x.pct }))
+      );
 
       const diaryRow =
         (
@@ -240,13 +233,12 @@ export default function Home() {
         )?.[0] ?? null;
 
       setDash({
-        assignments: inc.slice(0, 3),
-        assignmentCount: inc.length,
+        assignments: inc,
         income,
         expense,
         diary: diaryRow,
-        goals: gp.slice(0, 3),
-        goalCount: gp.length,
+        // 달성한 목표는 Achievement 페이지로 간다. 대시보드는 진행 중인 것만.
+        goals: gp.filter((x) => !isAchieved(x, x.pct)),
         habits,
       });
     });
@@ -255,6 +247,22 @@ export default function Home() {
       ignore = true;
     };
     // today는 YYYY-MM-DD 문자열이라 같은 날 동안은 값이 바뀌지 않는다.
+  }, [user, supabase, today]);
+
+  // 요약은 /Summary와 같은 함수를 쓴다. 위 조회와 목표·과제·습관이 겹치지만,
+  // ponytail: 계산을 한 곳에 두는 값이 중복 조회보다 크다. 무거워지면 위 Promise.all에
+  // 합치고 buildWeeklySummary를 직접 부르면 된다.
+  //
+  // 습관을 체크하면 준수율이 곧바로 달라지므로 토글 뒤에도 다시 읽는다(toggleToday).
+  // 늦게 도착한 응답이 최신 값을 덮지 않도록 순번을 센다.
+  const summaryReq = useRef(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const seq = ++summaryReq.current;
+    loadWeeklySummary(supabase, user.id, today).then((s) => {
+      if (seq === summaryReq.current) setSummary(s);
+    });
   }, [user, supabase, today]);
 
   const toggleToday = async (habit: { id: string; dates: string[] }) => {
@@ -276,16 +284,21 @@ export default function Home() {
           : prev
       );
     apply(nextDates);
-    const { error } = done
-      ? await supabase
-        .from("daily_habit_logs")
-        .delete()
-        .eq("habit_id", habit.id)
-        .eq("done_on", today)
-      : await supabase
-        .from("daily_habit_logs")
-        .insert({ user_id: user.id, habit_id: habit.id, done_on: today });
-    if (error) apply(base);
+    const error = await writeHabitLog(supabase, {
+      userId: user.id,
+      habitId: habit.id,
+      date: today,
+      wasDone: done,
+    });
+    if (error) {
+      apply(base);
+      return;
+    }
+    // ponytail: 클릭당 조회 6번. 부담되면 rows를 들고 있다가 buildWeeklySummary만
+    // 다시 돌리면 된다.
+    const seq = ++summaryReq.current;
+    const s = await loadWeeklySummary(supabase, user.id, today);
+    if (seq === summaryReq.current) setSummary(s);
   };
 
   /**
@@ -331,21 +344,25 @@ export default function Home() {
         </div>
 
         {!loading && user ? (
-          <nav className="flex flex-1 items-center justify-end gap-2 sm:gap-4 lg:flex-none lg:gap-6">
-            <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-3">
-              {FEATURES.map((f) => (
+          // lg 아래에서는 nav가 로고와 같은 줄에 끼어 칩이 3줄로 깨진다. 아래 줄을
+          // 통째로 쓰게 해 한 줄에 담는다. lg는 지금 그대로(flex-none, 폭 자동).
+          <nav className="flex w-full flex-none items-center justify-end gap-2 sm:gap-4 lg:w-auto lg:gap-6">
+            {/* 칩 5개 + 알림 + Log out은 375px 한 줄에 안 들어간다. 모바일에서만
+                칩을 줄이고, 그래도 남으면 줄바꿈시킨다(sm 이상은 지금 그대로). */}
+            <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2 lg:gap-3">
+              {[...FEATURES, SUMMARY_FEATURE].map((f) => (
                 <Link
                   key={f.href}
                   href={f.href}
                   title={f.label}
-                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#9da19a]/30 bg-white/70 px-2 py-1.5 backdrop-blur transition-colors hover:border-[#24490b]/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24490b]/40 lg:pl-2 lg:pr-4"
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#9da19a]/30 bg-white/70 px-1.5 py-1.5 backdrop-blur transition-colors hover:border-[#24490b]/40 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24490b]/40 sm:px-2 lg:pl-2 lg:pr-4"
                 >
                   <Image
                     src={f.img}
                     alt={f.label}
                     width={f.w}
                     height={f.h}
-                    className="h-7 w-auto sm:h-8"
+                    className="h-6 w-auto sm:h-8"
                   />
                   <span className="hidden text-sm font-semibold text-[#1b2416] lg:inline">
                     {f.label}
@@ -392,7 +409,7 @@ export default function Home() {
                   {dash.assignments.length === 0 ? (
                     <EmptyLine text="임박한 과제가 없어요 🎉" />
                   ) : (
-                    <ul className="flex flex-col gap-2">
+                    <ul className="flex max-h-28 flex-col gap-2 overflow-y-auto pr-1">
                       {dash.assignments.map((a) => {
                         const dl = dueLabel(a.due_date);
                         return (
@@ -427,11 +444,6 @@ export default function Home() {
                           </li>
                         );
                       })}
-                      {dash.assignmentCount > 3 && (
-                        <li className="text-xs text-gray-400">
-                          +{dash.assignmentCount - 3}개 더
-                        </li>
-                      )}
                     </ul>
                   )}
                 </Widget>
@@ -499,7 +511,8 @@ export default function Home() {
                     <EmptyLine text="첫 목표를 심어보세요." />
                   ) : (
                     <div className="flex flex-col gap-4">
-                      <div className="flex flex-col gap-3">
+                      {/* 3줄까지는 그대로 보이고, 그보다 많으면 목록 안에서 스크롤된다. */}
+                      <div className="flex max-h-32 flex-col gap-3 overflow-y-auto pr-1">
                         {dash.goals.map((g) => (
                           <Link
                             key={g.id}
@@ -524,12 +537,6 @@ export default function Home() {
                           </Link>
                         ))}
                       </div>
-
-                      {dash.goalCount > 3 && (
-                        <p className="text-xs text-gray-400">
-                          +{dash.goalCount - 3}개 더
-                        </p>
-                      )}
                     </div>
                   )}
                 </Widget>
@@ -546,8 +553,9 @@ export default function Home() {
                         <b className="text-[#24490b]">{dueDoneCount}</b>
                         /{dueHabits.length} 완료
                       </p>
-                      <ul className="flex flex-col gap-1.5">
-                        {dueHabits.slice(0, 4).map(({ habit: h, dateSet }) => {
+                      {/* 4줄까지는 그대로 보이고, 그보다 많으면 목록 안에서 스크롤된다. */}
+                      <ul className="flex max-h-[7.5rem] flex-col gap-1.5 overflow-y-auto pr-1">
+                        {dueHabits.map(({ habit: h, dateSet }) => {
                           const doneToday = dateSet.has(today);
                           const streak = currentStreak(
                             dateSet,
@@ -584,6 +592,52 @@ export default function Home() {
                         })}
                       </ul>
                     </>
+                  )}
+                </Widget>
+
+                {/* 이번 주 요약 — 세 값만. 목표별 변화 상세는 /Summary가 맡는다. */}
+                <Widget title="이번 주 요약" href="/Summary">
+                  {!summary ? (
+                    <EmptyLine text="집계하는 중..." />
+                  ) : (
+                    <dl className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <dt className="text-xs text-gray-500">습관 준수</dt>
+                        <dd className="mt-1 font-mono text-lg font-bold tabular-nums text-[#4d7c2f]">
+                          {summary.habit.rate === null ? (
+                            "-"
+                          ) : (
+                            <CountUp
+                              value={Math.round(summary.habit.rate)}
+                              suffix="%"
+                            />
+                          )}
+                        </dd>
+                        {summary.habit.deltaPp !== null && (
+                          <dd className="font-mono text-[11px] tabular-nums text-gray-400">
+                            {signedPp(summary.habit.deltaPp)}
+                          </dd>
+                        )}
+                      </div>
+                      <div>
+                        <dt className="text-xs text-gray-500">완료 과제</dt>
+                        <dd className="mt-1 font-mono text-lg font-bold tabular-nums text-[#1b2416]">
+                          {summary.tasksDone}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-gray-500">지출</dt>
+                        <dd className="mt-1 font-mono text-sm font-bold tabular-nums text-[#c2603a]">
+                          <Won value={summary.spend.total} />
+                        </dd>
+                        {summary.spend.changePct !== null && (
+                          <dd className="font-mono text-[11px] tabular-nums text-gray-400">
+                            {summary.spend.changePct > 0 ? "+" : ""}
+                            {Math.round(summary.spend.changePct)}%
+                          </dd>
+                        )}
+                      </div>
+                    </dl>
                   )}
                 </Widget>
               </div>

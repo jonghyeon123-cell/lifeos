@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import EmptyCard from "@/components/EmptyCard";
 import PageHeader from "@/components/PageHeader";
+import TrashButton from "@/components/TrashButton";
+import { CARD, INPUT } from "@/lib/ui";
+import { monthRange, pad } from "@/lib/date";
 
 type EntryType = "income" | "expense";
 
@@ -19,16 +21,20 @@ type BudgetEntry = {
   created_at: string;
 };
 
-const CARD =
-  "bg-white/70 backdrop-blur border border-[#9da19a]/30 rounded-3xl shadow-[0_1px_3px_rgba(36,73,11,0.06)]";
-const INPUT =
-  "rounded-full border border-[#9da19a]/40 bg-white/80 px-4 py-2.5 text-sm outline-none focus:border-[#24490b]";
+const ENTRY_SELECT =
+  "id, type, amount, category, memo, entry_date, created_at";
 
 const EXPENSE_CATEGORIES = ["식비", "교통", "쇼핑", "문화", "주거", "기타"];
 const INCOME_CATEGORIES = ["급여", "용돈", "기타"];
 
-const pad = (n: number) => String(n).padStart(2, "0");
 const fmt = (n: number) => new Intl.NumberFormat("ko-KR").format(n);
+
+const normalize = (rows: BudgetEntry[]) =>
+  rows
+    .map((r) => ({ ...r, amount: Number(r.amount) }))
+    .sort((a, b) => b.entry_date.localeCompare(a.entry_date));
+
+type Loaded = { failed: true } | { failed: false; entries: BudgetEntry[] };
 
 function Won({ value }: { value: number }) {
   return (
@@ -42,19 +48,13 @@ function Won({ value }: { value: number }) {
 }
 
 export default function BudgetPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const supabase = useMemo(() => createClient(), []);
 
   const [year, setYear] = useState<number>(() => new Date().getFullYear());
   const [month, setMonth] = useState<number>(() => new Date().getMonth()); // 0-11
 
-  const range = useMemo(() => {
-    const start = `${year}-${pad(month + 1)}-01`;
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    const end = `${year}-${pad(month + 1)}-${pad(lastDay)}`;
-    return { start, end };
-  }, [year, month]);
+  const range = useMemo(() => monthRange(year, month + 1), [year, month]);
 
   const [entries, setEntries] = useState<BudgetEntry[]>([]);
   const [fetching, setFetching] = useState(true);
@@ -66,47 +66,40 @@ export default function BudgetPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!loading && !user) router.replace("/auth");
-  }, [loading, user, router]);
-
-  const normalize = (rows: BudgetEntry[]) =>
-    rows
-      .map((r) => ({ ...r, amount: Number(r.amount) }))
-      .sort((a, b) => b.entry_date.localeCompare(a.entry_date));
-
-  const load = useCallback(async () => {
-    if (!user) return;
+  // 조회는 순수하게, 상태 반영은 then 콜백에서 (과제·목표 페이지와 같은 형태).
+  const fetchAll = useCallback(async (): Promise<Loaded | null> => {
+    if (!user) return null;
     const { data, error } = await supabase
       .from("budget_entries")
-      .select("id, type, amount, category, memo, entry_date, created_at")
+      .select(ENTRY_SELECT)
       .eq("user_id", user.id)
       .gte("entry_date", range.start)
       .lte("entry_date", range.end);
-    if (error) setError("내역을 불러오지 못했어요.");
-    else setEntries(normalize((data as BudgetEntry[]) ?? []));
-    setFetching(false);
+    if (error) return { failed: true };
+    return { failed: false, entries: normalize((data as BudgetEntry[]) ?? []) };
   }, [supabase, user, range.start, range.end]);
 
+  const apply = useCallback((res: Loaded | null) => {
+    if (!res) return;
+    if (res.failed) setError("내역을 불러오지 못했어요.");
+    else setEntries(res.entries);
+    setFetching(false);
+  }, []);
+
   useEffect(() => {
-    if (!user) return;
     let ignore = false;
-    supabase
-      .from("budget_entries")
-      .select("id, type, amount, category, memo, entry_date, created_at")
-      .eq("user_id", user.id)
-      .gte("entry_date", range.start)
-      .lte("entry_date", range.end)
-      .then(({ data, error }) => {
-        if (ignore) return;
-        if (error) setError("내역을 불러오지 못했어요.");
-        else setEntries(normalize((data as BudgetEntry[]) ?? []));
-        setFetching(false);
-      });
+    fetchAll().then((res) => {
+      if (!ignore) apply(res);
+    });
     return () => {
       ignore = true;
     };
-  }, [user, supabase, range.start, range.end]);
+  }, [fetchAll, apply]);
+
+  /** 낙관적 갱신이 실패했을 때 서버 상태로 되돌린다. */
+  const load = useCallback(() => {
+    fetchAll().then(apply);
+  }, [fetchAll, apply]);
 
   const summary = useMemo(() => {
     let income = 0;
@@ -142,7 +135,7 @@ export default function BudgetPage() {
         entry_date:
           date || `${year}-${pad(month + 1)}-${pad(new Date().getDate())}`,
       })
-      .select("id, type, amount, category, memo, entry_date, created_at")
+      .select(ENTRY_SELECT)
       .single();
     if (error || !data) {
       setError("추가하지 못했어요.");
@@ -204,21 +197,21 @@ export default function BudgetPage() {
 
           {/* 요약 카드 */}
           <div
-            className={`${CARD} mt-6 grid grid-cols-3 divide-x divide-[#9da19a]/20 px-2 py-5`}
+            className={`${CARD} mt-6 grid grid-cols-3 divide-x divide-[#9da19a]/20 px-1 py-5 sm:px-2`}
           >
-            <div className="px-2 text-center">
+            <div className="px-1 text-center sm:px-2">
               <p className="text-xs text-gray-500">수입</p>
               <p className="mt-1 font-mono text-sm font-bold tabular-nums text-[#4d7c2f] sm:text-base">
                 <Won value={summary.income} />
               </p>
             </div>
-            <div className="px-2 text-center">
+            <div className="px-1 text-center sm:px-2">
               <p className="text-xs text-gray-500">지출</p>
               <p className="mt-1 font-mono text-sm font-bold tabular-nums text-[#c2603a] sm:text-base">
                 <Won value={summary.expense} />
               </p>
             </div>
-            <div className="px-2 text-center">
+            <div className="px-1 text-center sm:px-2">
               <p className="text-xs text-gray-500">잔액</p>
               <p
                 className={`mt-1 font-mono text-sm font-bold tabular-nums sm:text-base ${
@@ -318,20 +311,9 @@ export default function BudgetPage() {
             {fetching ? (
               <li className="text-sm text-gray-500">불러오는 중...</li>
             ) : entries.length === 0 ? (
-              <li
-                className={`${CARD} flex flex-col items-center gap-3 px-6 py-12 text-center`}
-              >
-                <Image
-                  src="/face.svg"
-                  alt=""
-                  width={56}
-                  height={56}
-                  className="opacity-80"
-                />
-                <p className="text-sm text-gray-500">
-                  이번 달 내역이 없어요. 위에서 첫 내역을 추가해보세요.
-                </p>
-              </li>
+              <EmptyCard>
+                이번 달 내역이 없어요. 위에서 첫 내역을 추가해보세요.
+              </EmptyCard>
             ) : (
               entries.map((item) => (
                 <li
@@ -361,25 +343,7 @@ export default function BudgetPage() {
                     {item.type === "income" ? "+" : "-"}
                     <Won value={item.amount} />
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => remove(item)}
-                    aria-label="삭제"
-                    className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                    </svg>
-                  </button>
+                  <TrashButton onClick={() => remove(item)} />
                 </li>
               ))
             )}

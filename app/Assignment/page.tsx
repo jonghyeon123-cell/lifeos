@@ -1,21 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import CheckButton from "@/components/CheckButton";
+import EmptyCard from "@/components/EmptyCard";
 import PageHeader from "@/components/PageHeader";
 import PencilIcon from "@/components/PencilIcon";
-import { CARD, PRIMARY_BTN } from "@/lib/ui";
+import TrashButton from "@/components/TrashButton";
+import { CARD, INPUT, PRIMARY_BTN, SECONDARY_BTN } from "@/lib/ui";
 import {
   ASSIGNMENT_SELECT,
   type Assignment,
   GOAL_OPTION_SELECT,
   type GoalOption,
   goalHref,
+  setAssignmentCompleted,
   sortAssignments,
   sortGoalOptions,
 } from "@/lib/goals";
@@ -28,16 +29,12 @@ import { dueLabel } from "@/lib/date";
 
 const NO_GOAL = "";
 
-const FIELD =
-  "rounded-full border border-[#9da19a]/40 bg-white/80 px-4 py-2.5 text-sm outline-none focus:border-[#24490b]";
-
 type Loaded =
   | { failed: true }
   | { failed: false; assignments: Assignment[]; goals: GoalOption[] };
 
 export default function AssignmentPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const supabase = useMemo(() => createClient(), []);
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -56,10 +53,6 @@ export default function AssignmentPage() {
     for (const g of goals) m.set(g.id, g);
     return m;
   }, [goals]);
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/auth");
-  }, [loading, user, router]);
 
   // 조회는 순수하게, 상태 반영은 then 콜백에서 (effect 본문 setState 회피).
   const fetchAll = useCallback(async (): Promise<Loaded | null> => {
@@ -143,10 +136,7 @@ export default function AssignmentPage() {
         prev.map((a) => (a.id === item.id ? { ...a, completed: next } : a))
       )
     );
-    const { error } = await supabase
-      .from("assignments")
-      .update({ completed: next, updated_at: new Date().toISOString() })
-      .eq("id", item.id);
+    const error = await setAssignmentCompleted(supabase, item.id, next);
     if (error) load();
   };
 
@@ -251,20 +241,20 @@ export default function AssignmentPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="과제 제목"
-              className={`${FIELD} flex-1 sm:min-w-[12rem]`}
+              className={`${INPUT} flex-1 sm:min-w-[12rem]`}
             />
             <input
               type="text"
               value={course}
               onChange={(e) => setCourse(e.target.value)}
               placeholder="과목 (선택)"
-              className={`${FIELD} sm:w-32`}
+              className={`${INPUT} sm:w-32`}
             />
             <select
               value={goalId}
               onChange={(e) => setGoalId(e.target.value)}
               aria-label="연결할 목표 (선택)"
-              className={`${FIELD} sm:w-44`}
+              className={`${INPUT} sm:w-44`}
             >
               <option value={NO_GOAL}>목표 없음</option>
               {goals.map((g) => (
@@ -277,7 +267,7 @@ export default function AssignmentPage() {
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              className={FIELD}
+              className={INPUT}
             />
             <input
               type="time"
@@ -285,7 +275,7 @@ export default function AssignmentPage() {
               onChange={(e) => setDueTime(e.target.value)}
               disabled={!dueDate}
               aria-label="마감 시간 (선택)"
-              className={`${FIELD} disabled:opacity-40`}
+              className={`${INPUT} disabled:opacity-40`}
             />
             <button
               type="submit"
@@ -302,20 +292,9 @@ export default function AssignmentPage() {
             {fetching ? (
               <li className="text-sm text-gray-500">불러오는 중...</li>
             ) : assignments.length === 0 ? (
-              <li
-                className={`${CARD} flex flex-col items-center gap-3 px-6 py-12 text-center`}
-              >
-                <Image
-                  src="/face.svg"
-                  alt=""
-                  width={56}
-                  height={56}
-                  className="opacity-80"
-                />
-                <p className="text-sm text-gray-500">
-                  아직 등록된 과제가 없어요. 위에서 첫 과제를 추가해보세요.
-                </p>
-              </li>
+              <EmptyCard>
+                아직 등록된 과제가 없어요. 위에서 첫 과제를 추가해보세요.
+              </EmptyCard>
             ) : (
               assignments.map((item) => (
                 <AssignmentRow
@@ -352,7 +331,7 @@ function AssignmentRow({
 }: {
   item: Assignment;
   goals: GoalOption[];
-  /** 목록 로드가 늦어 goals에 아직 없을 수 있어 별도로 받는다. */
+  /** goals에서 goal_id로 찾아둔 목표. 목록에 없으면 undefined. */
   linkedGoal: GoalOption | undefined;
   onToggle: (item: Assignment) => void;
   onChangeGoal: (item: Assignment, next: string) => void;
@@ -423,7 +402,7 @@ function AssignmentRow({
               value={convertFreq}
               onChange={(e) => setConvertFreq(e.target.value)}
               aria-label="반복 주기"
-              className={`${FIELD} sm:w-28`}
+              className={`${INPUT} sm:w-28`}
             >
               {FREQUENCY_OPTIONS.map((f) => (
                 <option key={f.value} value={f.value}>
@@ -437,7 +416,7 @@ function AssignmentRow({
             <button
               type="button"
               onClick={() => setConverting(false)}
-              className="flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-5 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100"
+              className={SECONDARY_BTN}
             >
               취소
             </button>
@@ -457,7 +436,7 @@ function AssignmentRow({
             onChange={(e) => setETitle(e.target.value)}
             placeholder="과제 제목"
             aria-label="과제 제목"
-            className={`${FIELD} w-full`}
+            className={`${INPUT} w-full`}
           />
           <div className="flex flex-wrap items-center gap-3">
             <input
@@ -466,14 +445,14 @@ function AssignmentRow({
               onChange={(e) => setECourse(e.target.value)}
               placeholder="과목 (선택)"
               aria-label="과목 (선택)"
-              className={`${FIELD} sm:w-32`}
+              className={`${INPUT} sm:w-32`}
             />
             <input
               type="date"
               value={eDate}
               onChange={(e) => setEDate(e.target.value)}
               aria-label="마감기한 (선택)"
-              className={FIELD}
+              className={INPUT}
             />
             <input
               type="time"
@@ -481,7 +460,7 @@ function AssignmentRow({
               onChange={(e) => setETime(e.target.value)}
               disabled={!eDate}
               aria-label="마감 시간 (선택)"
-              className={`${FIELD} disabled:opacity-40`}
+              className={`${INPUT} disabled:opacity-40`}
             />
             <button
               type="submit"
@@ -493,7 +472,7 @@ function AssignmentRow({
             <button
               type="button"
               onClick={() => setEditing(false)}
-              className="flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-5 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100"
+              className={SECONDARY_BTN}
             >
               취소
             </button>
@@ -504,9 +483,11 @@ function AssignmentRow({
   }
 
   const due = dueLabel(item.due_date);
+  // 좁은 화면에서는 마감·버튼 묶음이 아래 줄로 내려간다. 한 줄에 다 두면 제목이
+  // min-w-0로 0까지 줄어 읽을 수 없다. sm 이상은 지금 그대로 한 줄이다.
   return (
     <li
-      className={`${CARD} flex items-center gap-4 px-5 py-4 transition-shadow hover:shadow-[0_6px_20px_rgba(36,73,11,0.10)] ${
+      className={`${CARD} flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-shadow hover:shadow-[0_6px_20px_rgba(36,73,11,0.10)] sm:flex-nowrap ${
         item.completed ? "opacity-55" : ""
       }`}
     >
@@ -549,8 +530,8 @@ function AssignmentRow({
               </option>
             ))}
             {/* 목록에 없는 목표에 연결돼 있으면(로드 지연 등) 값이 사라지지 않도록 보강 */}
-            {item.goal_id && !goals.some((g) => g.id === item.goal_id) && (
-              <option value={item.goal_id}>{linkedGoal?.title ?? "목표"}</option>
+            {item.goal_id && !linkedGoal && (
+              <option value={item.goal_id}>목표</option>
             )}
           </select>
           {linkedGoal && (
@@ -564,72 +545,56 @@ function AssignmentRow({
         </div>
       </div>
 
-      {(due || item.due_time) && (
-        <div className="flex flex-none flex-col items-end leading-tight">
-          {due && (
-            <span
-              className={`font-mono text-xs font-semibold tabular-nums ${
-                item.completed
-                  ? "text-gray-400"
-                  : due.overdue
-                    ? "text-red-600"
-                    : due.soon
-                      ? "text-orange-500"
-                      : "text-gray-500"
-              }`}
-            >
-              {due.text}
-            </span>
-          )}
-          {item.due_time && (
-            <span className="font-mono text-[11px] tabular-nums text-gray-400">
-              {item.due_time.slice(0, 5)}
-            </span>
-          )}
-        </div>
-      )}
+      <div className="flex w-full items-center justify-end gap-4 sm:w-auto">
+        {(due || item.due_time) && (
+          <div className="flex flex-none flex-col items-end leading-tight">
+            {due && (
+              <span
+                className={`font-mono text-xs font-semibold tabular-nums ${
+                  item.completed
+                    ? "text-gray-400"
+                    : due.overdue
+                      ? "text-red-600"
+                      : due.soon
+                        ? "text-orange-500"
+                        : "text-gray-500"
+                }`}
+              >
+                {due.text}
+              </span>
+            )}
+            {item.due_time && (
+              <span className="font-mono text-[11px] tabular-nums text-gray-400">
+                {item.due_time.slice(0, 5)}
+              </span>
+            )}
+          </div>
+        )}
 
-      {/* 반복해야 하는 일을 과제로 만들어두면 체크가 다음 날 리셋되지 않는다.
-          그럴 때 기록을 새로 만들지 않고 습관 쪽으로 옮기는 경로. */}
-      <button
-        type="button"
-        onClick={() => setConverting(true)}
-        aria-label="습관으로 전환"
-        title="반복되는 일이면 습관으로 전환"
-        className="flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-2.5 py-1 font-mono text-[11px] text-gray-500 transition-colors hover:border-[#24490b]/40 hover:text-[#24490b]"
-      >
-        습관으로
-      </button>
-
-      <button
-        type="button"
-        onClick={startEdit}
-        aria-label="과제 수정"
-        title="과제 수정"
-        className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-[#e2f9d1] hover:text-[#24490b]"
-      >
-        <PencilIcon />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onRemove(item)}
-        aria-label="삭제"
-        className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+        {/* 반복해야 하는 일을 과제로 만들어두면 체크가 다음 날 리셋되지 않는다.
+            그럴 때 기록을 새로 만들지 않고 습관 쪽으로 옮기는 경로. */}
+        <button
+          type="button"
+          onClick={() => setConverting(true)}
+          aria-label="습관으로 전환"
+          title="반복되는 일이면 습관으로 전환"
+          className="flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-2.5 py-1 font-mono text-[11px] text-gray-500 transition-colors hover:border-[#24490b]/40 hover:text-[#24490b]"
         >
-          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-        </svg>
-      </button>
+          습관으로
+        </button>
+
+        <button
+          type="button"
+          onClick={startEdit}
+          aria-label="과제 수정"
+          title="과제 수정"
+          className="flex-none rounded-full p-2 text-gray-400 transition-colors hover:bg-[#e2f9d1] hover:text-[#24490b]"
+        >
+          <PencilIcon />
+        </button>
+
+        <TrashButton onClick={() => onRemove(item)} />
+      </div>
     </li>
   );
 }

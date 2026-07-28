@@ -6,5 +6,8 @@ export const CARD =
 export const INPUT =
   "rounded-full border border-[#9da19a]/40 bg-white/80 px-4 py-2.5 text-sm outline-none focus:border-[#24490b]";
 
+export const SECONDARY_BTN =
+  "flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-5 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100";
+
 export const PRIMARY_BTN =
   "flex-none whitespace-nowrap rounded-full border border-[#24490b] bg-[#e2f9d1] px-6 py-2.5 text-sm font-semibold text-[#24490b] transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24490b]/40 disabled:cursor-not-allowed disabled:opacity-40";

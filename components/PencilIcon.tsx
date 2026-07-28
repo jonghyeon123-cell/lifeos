@@ -1,8 +1,8 @@
-export default function PencilIcon({ size = 15 }: { size?: number }) {
+export default function PencilIcon() {
   return (
     <svg
-      width={size}
-      height={size}
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

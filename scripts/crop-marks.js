@@ -76,8 +76,11 @@ function decode(file) {
 // alpha > 40 을 "보이는 픽셀"로 본다. 글로우 잔여물이 경계를 부풀리지 않을 만큼의 문턱값.
 const ALPHA = 40;
 
-function crop(src, dst) {
-  const { w, h, px } = decode(src);
+// maxY: 이 행 아래는 없는 셈 친다. 그림 밑에 캡션 글자가 같이 그려진 원본에서
+// 캡션만 떼어낼 때 쓴다 (네비 칩은 라벨을 따로 렌더하므로 그림 속 글자는 중복).
+function crop(src, dst, maxY = Infinity) {
+  const { w, h: fullH, px } = decode(src);
+  const h = Math.min(fullH, maxY);
   let top = -1, bot = -1, left = -1, right = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -117,4 +120,7 @@ crop("achievement.png", "mark-achievement.png");
 crop("Assignment.png", "mark-assignment.png");
 crop("Budget.png", "mark-budget.png");
 crop("Diary.png", "mark-diary.png");
+crop("Summary.png", "mark-summary.png");
+// 원본은 캐릭터(195~697행) 아래에 "요약" 캡션(726~830행)이 함께 그려져 있다.
+crop("Summary-sprout.png", "sprout-summary.png", 700);
 crop("LifeOS.png", "mark-lifeos.png");

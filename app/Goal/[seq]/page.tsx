@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useParams } from "next/navigation";
+import { useRequireAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import CheckButton from "@/components/CheckButton";
 import PageHeader, { GoalLink } from "@/components/PageHeader";
 import PencilIcon from "@/components/PencilIcon";
 import ProgressBar from "@/components/ProgressBar";
-import { CARD, INPUT, PRIMARY_BTN } from "@/lib/ui";
+import { CARD, INPUT, PRIMARY_BTN, SECONDARY_BTN } from "@/lib/ui";
 import {
   ASSIGNMENT_SELECT,
   type Assignment,
@@ -20,6 +20,7 @@ import {
   formatPct,
   goalProgress,
   pendingCompletionWrites,
+  setAssignmentCompleted,
   sortAssignments,
 } from "@/lib/goals";
 import {
@@ -28,6 +29,8 @@ import {
   type Habit,
   type HabitLog,
   datesByHabit as buildDatesByHabit,
+  sortHabits,
+  writeHabitLog,
 } from "@/lib/habits";
 import HabitCard from "@/components/HabitCard";
 import HabitForm from "@/components/HabitForm";
@@ -46,8 +49,7 @@ type Loaded =
 
 
 export default function GoalDetailPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const params = useParams<{ seq: string }>();
   // URL은 사용자별 번호다. 숫자가 아니면 조회 자체를 하지 않는다.
   const goalSeq = Number(params.seq);
@@ -78,10 +80,6 @@ export default function GoalDetailPage() {
 
   // 수동 진행률 슬라이더는 서버 왕복을 기다리지 않고 즉시 움직여야 하므로 별도 상태로 둔다.
   const [manualDraft, setManualDraft] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/auth");
-  }, [loading, user, router]);
 
   // 조회는 순수하게, 상태 반영은 then 콜백에서 (effect 본문 setState 회피).
   const fetchAll = useCallback(async (): Promise<Loaded | null> => {
@@ -119,9 +117,7 @@ export default function GoalDetailPage() {
       status: "ok",
       goal,
       items: sortAssignments(assignments),
-      habits: [...daily_habits].sort((x, y) =>
-        x.created_at.localeCompare(y.created_at)
-      ),
+      habits: sortHabits(daily_habits),
       logs: (l.data as HabitLog[]) ?? [],
     };
   }, [supabase, user, goalSeq, validSeq]);
@@ -207,10 +203,7 @@ export default function GoalDetailPage() {
         prev.map((a) => (a.id === item.id ? { ...a, completed: next } : a))
       )
     );
-    const { error } = await supabase
-      .from("assignments")
-      .update({ completed: next, updated_at: new Date().toISOString() })
-      .eq("id", item.id);
+    const error = await setAssignmentCompleted(supabase, item.id, next);
     if (error) load();
   };
 
@@ -243,23 +236,18 @@ export default function GoalDetailPage() {
   /** 습관 체크. logs가 바뀌면 progress가 파생 재계산되어 진행률이 즉시 움직인다. */
   const toggleHabit = async (habit: Habit) => {
     if (!user) return;
-    const done = (logsByHabit.get(habit.id) ?? EMPTY_DATES).has(today);
-    if (done) {
-      setLogs((prev) =>
-        prev.filter((l) => !(l.habit_id === habit.id && l.done_on === today))
-      );
-      const { error } = await supabase
-        .from("daily_habit_logs")
-        .delete()
-        .eq("habit_id", habit.id)
-        .eq("done_on", today);
-      if (error) load();
-      return;
-    }
-    setLogs((prev) => [...prev, { habit_id: habit.id, done_on: today }]);
-    const { error } = await supabase
-      .from("daily_habit_logs")
-      .insert({ user_id: user.id, habit_id: habit.id, done_on: today });
+    const wasDone = (logsByHabit.get(habit.id) ?? EMPTY_DATES).has(today);
+    setLogs((prev) =>
+      wasDone
+        ? prev.filter((l) => !(l.habit_id === habit.id && l.done_on === today))
+        : [...prev, { habit_id: habit.id, done_on: today }]
+    );
+    const error = await writeHabitLog(supabase, {
+      userId: user.id,
+      habitId: habit.id,
+      date: today,
+      wasDone,
+    });
     if (error) load();
   };
 
@@ -397,7 +385,7 @@ export default function GoalDetailPage() {
                   <button
                     type="button"
                     onClick={() => setEditing(false)}
-                    className="flex-none whitespace-nowrap rounded-full border border-[#9da19a]/50 px-5 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100"
+                    className={SECONDARY_BTN}
                   >
                     취소
                   </button>

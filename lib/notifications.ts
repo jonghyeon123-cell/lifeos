@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { daysInMonth } from "@/lib/date";
 
 // ---- types ----
 export type NotifSettings = {
@@ -8,6 +9,9 @@ export type NotifSettings = {
   habit_reminder_hour: number;
   budget_monthend_enabled: boolean;
 };
+
+export const NOTIF_SETTINGS_SELECT =
+  "assignment_days, goal_days, habit_reminder_enabled, habit_reminder_hour, budget_monthend_enabled";
 
 export const DEFAULT_SETTINGS: NotifSettings = {
   assignment_days: [5, 3, 1, 0],
@@ -72,8 +76,7 @@ function daysUntil(due: string, today: string) {
 
 function isMonthEnd(dateStr: string) {
   const [y, m, d] = dateStr.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return d === last;
+  return d === daysInMonth(y, m);
 }
 
 const won = (n: number) => `₩${new Intl.NumberFormat("ko-KR").format(n)}`;

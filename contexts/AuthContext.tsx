@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import type { Session, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -76,4 +77,17 @@ export function useAuth() {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+}
+
+/**
+ * 로그인해야만 볼 수 있는 페이지용. 확인이 끝났는데 로그인이 아니면 /auth로 보낸다.
+ * 판정 중(loading)에는 보내지 않는다 — 새로고침 직후 세션 복구를 기다려야 한다.
+ */
+export function useRequireAuth() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  useEffect(() => {
+    if (!loading && !user) router.replace("/auth");
+  }, [loading, user, router]);
+  return { user, loading };
 }

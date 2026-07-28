@@ -8,8 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import PageHeader, { GoalLink } from "@/components/PageHeader";
 import { CARD } from "@/lib/ui";
@@ -48,17 +47,12 @@ const first = (rows: CountRow | null) => rows?.[0]?.count ?? 0;
 type Loaded = { failed: true } | { failed: false; items: Achievement[] };
 
 export default function AchievementPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const supabase = useMemo(() => createClient(), []);
 
   const [items, setItems] = useState<Achievement[]>([]);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/auth");
-  }, [loading, user, router]);
 
   const fetchAll = useCallback(async (): Promise<Loaded | null> => {
     if (!user) return null;

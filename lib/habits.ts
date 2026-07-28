@@ -4,6 +4,7 @@
 // UNIQUE(habit_id, done_on)로 하루 중복이 막혀 있어, daily는 "그 날 행이 있나",
 // weekly는 "그 주에 행이 몇 개인가"로 같은 데이터에서 계산된다.
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   daysBetween,
   dateOf,
@@ -47,7 +48,7 @@ export const WEEKDAYS = [
 ] as const;
 
 /** YYYY-MM-DD → ISO 요일(1=월 … 7=일). Date의 0=일 표기를 월요일 시작으로 옮긴다. */
-export function isoWeekday(dateStr: string): number {
+function isoWeekday(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dow = new Date(y, m - 1, d).getDay();
   return dow === 0 ? 7 : dow;
@@ -162,7 +163,7 @@ export function frequencyValueOf(
 }
 
 /** 1~7만 남기고 중복 제거 후 정렬. DB의 scheduled_days 제약과 같은 규칙. */
-export function normalizeWeekdays(days?: readonly number[]): number[] {
+function normalizeWeekdays(days?: readonly number[]): number[] {
   if (!days) return [];
   const seen = new Set<number>();
   for (const d of days) {
@@ -174,8 +175,33 @@ export function normalizeWeekdays(days?: readonly number[]): number[] {
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
 /** weekly 습관의 주당 목표 횟수. daily는 항상 1. */
-export const targetPerWeek = (h: Pick<Habit, "frequency_type" | "frequency_count">) =>
+const targetPerWeek = (h: Pick<Habit, "frequency_type" | "frequency_count">) =>
   h.frequency_type === "weekly" ? Math.max(1, h.frequency_count) : 1;
+
+/**
+ * 체크 기록 한 건을 쓰거나 지운다. 홈·목표·목표 상세가 같은 문장을 쓴다.
+ * 낙관적 갱신은 화면마다 상태 모양이 달라 호출한 쪽이 하고, 여기서는 DB만 본다.
+ */
+export async function writeHabitLog(
+  supabase: SupabaseClient,
+  input: { userId: string; habitId: string; date: string; wasDone: boolean }
+) {
+  const { userId, habitId, date, wasDone } = input;
+  const { error } = wasDone
+    ? await supabase
+        .from("daily_habit_logs")
+        .delete()
+        .eq("habit_id", habitId)
+        .eq("done_on", date)
+    : await supabase
+        .from("daily_habit_logs")
+        .insert({ user_id: userId, habit_id: habitId, done_on: date });
+  return error;
+}
+
+/** 만든 순서대로. 목표 목록과 목표 상세가 같은 순서를 보여야 한다. */
+export const sortHabits = <T extends Pick<Habit, "created_at">>(rows: readonly T[]) =>
+  [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at));
 
 /** 로그를 습관별 날짜 Set으로 묶는다. 습관마다 배열을 훑는 것을 피한다. */
 export function datesByHabit(
@@ -216,17 +242,24 @@ export function currentStreak(
   return n;
 }
 
-export function bestStreak(dates: ReadonlySet<string>) {
-  const sorted = [...dates].sort();
+/**
+ * 정렬된 키 목록에서 가장 긴 연속 구간의 길이.
+ * next는 "그 키의 바로 다음 키"를 만든다 — 일/주/월 스트릭이 이것만 다르다.
+ */
+function longestRun(keys: string[], next: (key: string) => string) {
   let best = 0;
   let cur = 0;
   let prev: string | null = null;
-  for (const d of sorted) {
-    cur = prev && shiftDay(prev, 1) === d ? cur + 1 : 1;
+  for (const k of keys) {
+    cur = prev && next(prev) === k ? cur + 1 : 1;
     if (cur > best) best = cur;
-    prev = d;
+    prev = k;
   }
   return best;
+}
+
+function bestStreak(dates: ReadonlySet<string>) {
+  return longestRun([...dates].sort(), (d) => shiftDay(d, 1));
 }
 
 /**
@@ -247,7 +280,7 @@ export function currentWeekDays(dates: ReadonlySet<string>, today: string) {
 // ── weekly 스트릭 ────────────────────────────────────────────────
 
 /** 주(월요일 시작)별 체크 횟수. */
-export function weekCounts(
+function weekCounts(
   dates: ReadonlySet<string>,
   range?: { start: string; end: string }
 ): Map<string, number> {
@@ -273,7 +306,7 @@ export const thisWeekCount = (dates: ReadonlySet<string>, today: string) => {
  * 이번 주가 아직 미달이어도 지난주까지 이어져 있으면 스트릭은 살아 있다
  * (daily 스트릭이 "오늘 아직 안 함"을 봐주는 것과 같은 규칙).
  */
-export function currentWeeklyStreak(
+function currentWeeklyStreak(
   counts: Map<string, number>,
   target: number,
   today: string
@@ -291,23 +324,17 @@ export function currentWeeklyStreak(
   return n;
 }
 
-export function bestWeeklyStreak(counts: Map<string, number>, target: number) {
-  const weeks = [...counts.keys()].filter((w) => (counts.get(w) ?? 0) >= target).sort();
-  let best = 0;
-  let cur = 0;
-  let prev: string | null = null;
-  for (const w of weeks) {
-    cur = prev && shiftDay(prev, 7) === w ? cur + 1 : 1;
-    if (cur > best) best = cur;
-    prev = w;
-  }
-  return best;
+function bestWeeklyStreak(counts: Map<string, number>, target: number) {
+  const weeks = [...counts.keys()]
+    .filter((w) => (counts.get(w) ?? 0) >= target)
+    .sort();
+  return longestRun(weeks, (w) => shiftDay(w, 7));
 }
 
 // ── monthly 집계 ─────────────────────────────────────────────────
 
 /** 그 달(YYYY-MM)에 체크한 적이 있는가. */
-export function doneInMonth(
+function doneInMonth(
   dates: ReadonlySet<string>,
   month: string
 ): boolean {
@@ -326,37 +353,30 @@ export type MonthCell = {
 };
 
 /**
- * 최근 count개월의 월별 완료 여부. 오래된 달이 앞에 온다.
+ * 이번 달 칸.
  *
  * 놓친 달과 "아직 차례가 아닌 달"을 구분한다. 습관을 만들기 전 달(beforeStart)과
  * 예정일이 안 지난 달(pending)을 미완료로 칠하면 실제보다 나빠 보인다.
  */
-export function monthCells(
+export function monthCell(
   habit: Pick<Habit, "scheduled_day_of_month" | "created_at">,
   dates: ReadonlySet<string>,
-  today: string,
-  count = 6
-): MonthCell[] {
-  const day = habit.scheduled_day_of_month ?? 1;
-  const created = dateOf(habit.created_at);
-  const cells: MonthCell[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const month = shiftMonth(monthKey(today), -i);
-    const due = monthlyDate(month, day);
-    cells.push({
-      month,
-      done: doneInMonth(dates, month),
-      // 달 단위로 비교하면 "이번 달 5일에 만든 습관"의 그 달 1일 예정분까지
-      // 놓친 것으로 잡힌다. 예정일이 생성 시점보다 이른지로 본다.
-      beforeStart: due < created,
-      pending: today < due,
-    });
-  }
-  return cells;
+  today: string
+): MonthCell {
+  const month = monthKey(today);
+  const due = monthlyDate(month, habit.scheduled_day_of_month ?? 1);
+  return {
+    month,
+    done: doneInMonth(dates, month),
+    // 달 단위로 비교하면 "이번 달 5일에 만든 습관"의 그 달 1일 예정분까지
+    // 놓친 것으로 잡힌다. 예정일이 생성 시점보다 이른지로 본다.
+    beforeStart: due < dateOf(habit.created_at),
+    pending: today < due,
+  };
 }
 
 /** 이번 달(또는 예정일 전이면 지난달)부터 거슬러 올라간 연속 달성 개월 수. */
-export function currentMonthlyStreak(
+function currentMonthlyStreak(
   habit: Pick<Habit, "scheduled_day_of_month">,
   dates: ReadonlySet<string>,
   today: string
@@ -377,24 +397,16 @@ export function currentMonthlyStreak(
   return n;
 }
 
-export function bestMonthlyStreak(dates: ReadonlySet<string>): number {
+function bestMonthlyStreak(dates: ReadonlySet<string>): number {
   const months = [...new Set([...dates].map(monthKey))].sort();
-  let best = 0;
-  let cur = 0;
-  let prev: string | null = null;
-  for (const m of months) {
-    cur = prev && shiftMonth(prev, 1) === m ? cur + 1 : 1;
-    if (cur > best) best = cur;
-    prev = m;
-  }
-  return best;
+  return longestRun(months, (m) => shiftMonth(m, 1));
 }
 
 /**
  * 다음 예정일. 이번 달 예정일이 아직 안 왔고 이번 달을 안 했으면 이번 달,
  * 그 밖에는(이미 했거나 예정일이 지났으면) 다음 달 예정일.
  */
-export function nextMonthlyDue(
+function nextMonthlyDue(
   habit: Pick<Habit, "scheduled_day_of_month">,
   dates: ReadonlySet<string>,
   today: string
@@ -481,22 +493,6 @@ export function weekSlots(
 
 // ── "오늘 할 일" 노출 정책 ───────────────────────────────────────
 
-/** 이번 달에 체크한 적이 있는가. monthly의 "이번 달 완료" 판정. */
-export function doneThisMonth(
-  dates: ReadonlySet<string>,
-  today: string
-): boolean {
-  const mk = monthKey(today);
-  for (const d of dates) if (d.startsWith(mk)) return true;
-  return false;
-}
-
-/** monthly 습관의 이번 달 예정일. 그 달에 없는 날짜면 말일로 당겨진다. */
-export const monthlyDueDate = (
-  habit: Pick<Habit, "scheduled_day_of_month">,
-  today: string
-) => monthlyDate(monthKey(today), habit.scheduled_day_of_month ?? 1);
-
 /**
  * 홈 "오늘 할 일"에 오늘 나와야 하는가.
  *
@@ -520,8 +516,9 @@ export function isDueToday(
   today: string
 ): boolean {
   if (habit.frequency_type === "monthly") {
-    if (doneThisMonth(dates, today)) return false;
-    return today === monthlyDueDate(habit, today);
+    const month = monthKey(today);
+    if (doneInMonth(dates, month)) return false;
+    return today === monthlyDate(month, habit.scheduled_day_of_month ?? 1);
   }
 
   if (habit.frequency_type === "weekly") {

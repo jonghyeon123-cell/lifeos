@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   DEFAULT_SETTINGS,
+  NOTIF_SETTINGS_SELECT,
   buildCandidates,
   generateMessages,
   kstParts,
   type NotifSettings,
 } from "@/lib/notifications";
-import { weekStart } from "@/lib/date";
+import { monthRange, weekStart } from "@/lib/date";
 import {
   EMPTY_DATES,
   HABIT_SELECT,
@@ -26,26 +27,17 @@ export async function POST() {
   }
 
   const { date: today, hour } = kstParts();
-  const monthStart = `${today.slice(0, 7)}-01`;
   const [y, m] = today.split("-").map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  const monthEnd = `${today.slice(0, 7)}-${String(lastDay).padStart(2, "0")}`;
+  const { start: monthStart, end: monthEnd } = monthRange(y, m);
   const logsFrom = weekStart(today) < monthStart ? weekStart(today) : monthStart;
 
-  // load settings (default if none)
-  const { data: settingsRow } = await supabase
-    .from("notification_settings")
-    .select(
-      "assignment_days, goal_days, habit_reminder_enabled, habit_reminder_hour, budget_monthend_enabled"
-    )
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const settings: NotifSettings = settingsRow
-    ? (settingsRow as NotifSettings)
-    : DEFAULT_SETTINGS;
-
-  // gather sources in parallel
-  const [aRes, gRes, bRes, hRes, lRes] = await Promise.all([
+  // gather sources in parallel (설정은 아래 조회들과 무관하므로 함께 띄운다)
+  const [sRes, aRes, gRes, bRes, hRes, lRes] = await Promise.all([
+    supabase
+      .from("notification_settings")
+      .select(NOTIF_SETTINGS_SELECT)
+      .eq("user_id", user.id)
+      .maybeSingle(),
     supabase
       .from("assignments")
       .select("id, title, course, due_date, completed")
@@ -76,6 +68,11 @@ export async function POST() {
       .gte("done_on", logsFrom)
       .lte("done_on", today),
   ]);
+
+  // 설정 행이 없으면 기본값으로 돈다.
+  const settings: NotifSettings = sRes.data
+    ? (sRes.data as NotifSettings)
+    : DEFAULT_SETTINGS;
 
   let income = 0;
   let expense = 0;
