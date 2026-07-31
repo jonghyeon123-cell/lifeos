@@ -186,6 +186,26 @@
   .list-item strong { font-size: 0.92rem; }
   .list-item p { margin: 0.2rem 0 0; font-size: 0.83rem; color: #4a5647; }
 
+  /* week versus */
+  .versus { display: grid; grid-template-columns: 1fr auto 1fr; gap: 1.2rem; align-items: stretch; margin-top: 2.2rem; }
+  .versus-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 1.5rem; padding: 1.6rem;
+    box-shadow: 0 1px 3px rgba(36, 73, 11, 0.06);
+  }
+  .versus-card--after { border-color: var(--accent); }
+  .versus-tag {
+    display: inline-block; font-size: 0.72rem; font-weight: 700;
+    color: var(--accent); background: rgba(36, 73, 11, 0.08);
+    padding: 0.25rem 0.7rem; border-radius: 999px; margin-bottom: 0.7rem;
+  }
+  .versus-card h3 { font-size: 1rem; font-weight: 800; }
+  .versus-card p { font-size: 0.86rem; color: #4a5647; margin-top: 0.5rem; }
+  .versus-arrow {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; color: var(--accent); font-weight: 800;
+  }
+
   footer {
     padding: 2.5rem 1.5rem 3rem;
     text-align: center;
@@ -203,6 +223,8 @@
     .card.wide h3, .card.wide p { text-align: center; }
     .two-col { grid-template-columns: 1fr; }
     .about-grid { grid-template-columns: 1fr; }
+    .versus { grid-template-columns: 1fr; }
+    .versus-arrow { transform: rotate(90deg); }
     nav { display: none; }
   }
 </style>
@@ -352,6 +374,49 @@
     </div>
     <div class="hero-art">
       <img src="/lifeos_charcter.png" alt="LifeOS 캐릭터" style="max-width:260px" />
+    </div>
+  </div>
+</section>
+
+<section id="progress">
+  <span class="eyebrow">WEEK 1 → WEEK 2</span>
+  <h2>1주차와 2주차, 무엇이 달라졌나</h2>
+  <p class="lede">1주차에는 기능을 하나씩 독립적으로 만드는 데 집중했다면, 2주차에는 흩어진 기능을 서로 연결하는 시도를 했습니다.</p>
+
+  <div class="versus">
+    <div class="versus-card">
+      <span class="versus-tag">1주차</span>
+      <h3>과제와 목표는 따로 움직였다</h3>
+      <p>과제(Assignment)와 목표(Goal)를 각각 독립된 기능으로 만들었습니다. 둘 다 잘 동작했지만, 실제로 써보니 같은 목표를 놓고 과제와 습관이 따로 진행 상황을 보여주고 있었습니다.</p>
+    </div>
+    <div class="versus-arrow">→</div>
+    <div class="versus-card versus-card--after">
+      <span class="versus-tag">2주차</span>
+      <h3>과제·습관을 하나의 목표로 연결</h3>
+      <p>과제와 목표 사이에 연관성이 크다고 판단해 두 기능을 연결했습니다. 과제와 습관을 하나의 목표로 묶어, 두 요소를 함께 반영한 진행률을 보여줍니다.</p>
+    </div>
+  </div>
+</section>
+
+<section id="retro">
+  <span class="eyebrow">RETROSPECTIVE</span>
+  <h2>개발 과정의 시행착오와 배운 점</h2>
+  <p class="lede">기능을 만드는 것만큼, AI 도구와 함께 일하는 방법과 무엇을 만들지 판단하는 과정에서도 배운 점이 많았습니다.</p>
+
+  <div class="list">
+    <div class="list-item">
+      <span class="dot">1</span>
+      <div>
+        <strong>지시가 모호하면 결과도 어긋난다</strong>
+        <p>Claude Code에 정확한 의도를 전달하지 못해 예상과 다른 결과물이 나온 경우가 있었습니다. 원하는 바를 구체적으로, 단계적으로 전달할수록 결과가 훨씬 정확해진다는 것을 체감했습니다.</p>
+      </div>
+    </div>
+    <div class="list-item">
+      <span class="dot">2</span>
+      <div>
+        <strong>무엇이 유용한 기능인지 계속 고민했다</strong>
+        <p>기능을 무작정 추가하기보다, 사용자에게 실제로 도움이 되는 기능이 무엇일지 계속 스스로 묻는 과정이 필요했습니다. 과제·목표를 연결한 것도 이런 고민 끝에 나온 결정이었습니다.</p>
+      </div>
     </div>
   </div>
 </section>
