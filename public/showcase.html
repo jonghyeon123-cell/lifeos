@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LifeOS 소개</title>
+<link rel="icon" href="/favicon.png" />
+<style>
+  :root {
+    --background: #e2f9d1;
+    --background-top: #eefbe4;
+    --foreground: #1b2416;
+    --accent: #24490b;
+    --line: rgba(157, 161, 154, 0.35);
+    --card: rgba(255, 255, 255, 0.7);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: linear-gradient(180deg, var(--background-top) 0%, var(--background) 42%);
+    background-attachment: fixed;
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+    line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem 1.5rem;
+    background: rgba(238, 251, 228, 0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 0.6rem; }
+  .brand img { height: 2rem; width: auto; }
+  .brand span { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; }
+  nav { display: flex; align-items: center; gap: 0.3rem; }
+  nav a {
+    display: flex;
+    align-items: center;
+    height: 2.25rem;
+    padding: 0 0.9rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    transition: background-color 0.15s ease;
+  }
+  nav a:hover { background: rgba(36, 73, 11, 0.08); }
+  .cta-btn {
+    display: flex;
+    align-items: center;
+    height: 2.25rem;
+    padding: 0 1.1rem;
+    border-radius: 999px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #eefbe4;
+    font-size: 0.85rem;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: opacity 0.15s ease;
+  }
+  .cta-btn:hover { opacity: 0.85; }
+  .header-right { display: flex; align-items: center; gap: 0.6rem; }
+
+  /* about */
+  .about-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; margin-top: 2.2rem; }
+  .about-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 1.5rem; padding: 1.6rem;
+    box-shadow: 0 1px 3px rgba(36, 73, 11, 0.06);
+  }
+  .about-card .q { font-size: 0.78rem; font-weight: 700; color: var(--accent); }
+  .about-card h3 { font-size: 1.05rem; font-weight: 800; margin-top: 0.4rem; }
+  .about-card p { font-size: 0.87rem; color: #4a5647; margin-top: 0.6rem; }
+
+  section { padding: 5rem 1.5rem; max-width: 1080px; margin: 0 auto; }
+  .eyebrow {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    background: rgba(36, 73, 11, 0.08);
+    padding: 0.3rem 0.8rem;
+    border-radius: 999px;
+    margin-bottom: 1rem;
+  }
+  h1, h2, h3 { margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 800; }
+  .lede { max-width: 640px; color: #445140; font-size: 1rem; margin-top: 0.6rem; }
+
+  /* hero */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 2.5rem;
+    align-items: center;
+    padding-top: 4.5rem;
+  }
+  .hero h1 { font-size: clamp(2rem, 4.5vw, 3.1rem); font-weight: 800; }
+  .hero p { font-size: 1.05rem; color: #445140; margin-top: 1.1rem; max-width: 480px; }
+  .hero-note {
+    margin-top: 1.6rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.5rem 1.1rem 0.5rem 0.5rem;
+    font-size: 0.85rem;
+  }
+  .hero-note img { height: 1.6rem; width: 1.6rem; border-radius: 999px; }
+  .hero-art { display: flex; justify-content: center; }
+  .hero-art img { width: 100%; max-width: 340px; }
+  .chip-row { display: flex; gap: 0.6rem; margin-top: 2.2rem; flex-wrap: wrap; }
+  .chip {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 999px; padding: 0.4rem 0.9rem 0.4rem 0.4rem;
+    font-size: 0.8rem; font-weight: 600;
+  }
+  .chip img { height: 1.5rem; width: 1.5rem; }
+
+  /* feature grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.2rem;
+    margin-top: 2.5rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 1.5rem;
+    padding: 1.6rem;
+    box-shadow: 0 1px 3px rgba(36, 73, 11, 0.06);
+  }
+  .card .icon-wrap {
+    height: 84px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 0.8rem;
+  }
+  .card .icon-wrap img { height: 84px; width: auto; }
+  .card h3 { font-size: 1.02rem; font-weight: 700; text-align: center; }
+  .card p { font-size: 0.85rem; color: #4a5647; text-align: center; margin-top: 0.5rem; }
+  .card.wide { grid-column: span 3; display: flex; align-items: center; gap: 1.6rem; text-align: left; }
+  .card.wide .icon-wrap { margin-bottom: 0; flex: none; }
+  .card.wide h3, .card.wide p { text-align: left; }
+
+  /* mood strip */
+  .mood-strip {
+    display: flex; gap: 1rem; margin-top: 1.4rem; flex-wrap: wrap;
+  }
+  .mood {
+    display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 1.2rem; padding: 0.9rem 1.1rem; flex: 1; min-width: 90px;
+  }
+  .mood img { height: 44px; width: 44px; }
+  .mood span { font-size: 0.78rem; font-weight: 600; color: #445140; }
+
+  /* two column */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: center; }
+  .list { margin-top: 1.4rem; display: flex; flex-direction: column; gap: 0.9rem; }
+  .list-item {
+    display: flex; gap: 0.8rem; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 1rem; padding: 0.9rem 1.1rem;
+  }
+  .list-item .dot {
+    flex: none; width: 1.6rem; height: 1.6rem; border-radius: 999px;
+    background: var(--accent); color: #eefbe4; font-size: 0.75rem; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; margin-top: 0.1rem;
+  }
+  .list-item strong { font-size: 0.92rem; }
+  .list-item p { margin: 0.2rem 0 0; font-size: 0.83rem; color: #4a5647; }
+
+  footer {
+    padding: 2.5rem 1.5rem 3rem;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #5b6a56;
+    border-top: 1px solid var(--line);
+  }
+  footer .brand { justify-content: center; margin-bottom: 0.6rem; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-art { order: -1; }
+    .grid { grid-template-columns: repeat(2, 1fr); }
+    .card.wide { grid-column: span 2; flex-direction: column; text-align: center; }
+    .card.wide h3, .card.wide p { text-align: center; }
+    .two-col { grid-template-columns: 1fr; }
+    .about-grid { grid-template-columns: 1fr; }
+    nav { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <img src="/mark-face.svg" alt="LifeOS mascot" />
+    <img src="/mark-lifeos.png" alt="LifeOS" style="height:1.4rem" />
+  </div>
+  <div class="header-right">
+    <nav>
+      <a href="#about">소개</a>
+      <a href="#features">기능</a>
+      <a href="#ai">AI 알림</a>
+    </nav>
+    <a
+      class="cta-btn"
+      href="https://lifesprout.vercel.app/"
+      target="_blank"
+      rel="noopener noreferrer"
+      onclick="window.open(this.href, '_blank', 'noopener,noreferrer'); return false;"
+    >무료로 시작하기</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div>
+    <span class="eyebrow">PROJECT SHOWCASE</span>
+    <h1>작은 실천이 모여<br />큰 변화를 만들어요</h1>
+    <p>LifeOS는 과제·예산·일기·목표·습관을 한 곳에서 관리하고, 오늘 무엇을 해야 하는지 스스로 챙겨주는 개인 생산성 앱입니다.</p>
+    <div class="hero-note">
+      <img src="/lifeos_charcter.png" alt="LifeOS 캐릭터" />
+      오늘도, 당신의 삶을 응원합니다
+    </div>
+    <div class="chip-row">
+      <span class="chip"><img src="/sprout-assignment.png" alt="" />과제</span>
+      <span class="chip"><img src="/sprout-budget.png" alt="" />예산</span>
+      <span class="chip"><img src="/sprout-diary.png" alt="" />일기</span>
+      <span class="chip"><img src="/sprout-goal.png" alt="" />목표</span>
+    </div>
+  </div>
+  <div class="hero-art">
+    <img src="/sprout-summary.png" alt="LifeOS 요약 마스코트" />
+  </div>
+</section>
+
+<section id="about">
+  <span class="eyebrow">ABOUT</span>
+  <h2>왜, 누구를 위해, 언제 쓰는 도구인가요</h2>
+  <p class="lede">할 일과 목표, 지출, 감정을 각각 다른 앱에 흩어 놓다 보면 정작 오늘 뭘 챙겨야 하는지 한눈에 보이지 않습니다. LifeOS는 그 조각들을 한 곳에 모아 매일 확인하는 습관 하나로 만들자는 생각에서 시작했습니다.</p>
+
+  <div class="about-grid">
+    <div class="about-card">
+      <div class="q">왜 만들었나</div>
+      <h3>흩어진 자기관리, 한 화면으로</h3>
+      <p>과제 마감, 목표 진행, 예산, 감정 기록을 각각 다른 도구에서 챙기다 보면 놓치기 쉽습니다. LifeOS는 이 다섯 가지를 하나의 대시보드와 하나의 알림 흐름으로 묶었습니다.</p>
+    </div>
+    <div class="about-card">
+      <div class="q">누구에게 쓸모있나</div>
+      <h3>일상을 스스로 설계하는 사람</h3>
+      <p>과제와 일정이 많은 학생, 습관을 꾸준히 쌓고 싶은 사람, 목표와 예산을 함께 관리하고 싶은 1인 생활자에게 맞습니다.</p>
+    </div>
+    <div class="about-card">
+      <div class="q">언제 사용하나</div>
+      <h3>하루의 시작과 끝</h3>
+      <p>아침엔 오늘의 과제·습관·마감을 확인하고, 저녁엔 일기와 지출을 정리합니다. 그 사이 챙기지 못한 항목은 알림이 대신 짚어줍니다.</p>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <span class="eyebrow">FEATURES</span>
+  <h2>다섯 가지 화면으로 하루를 정리합니다</h2>
+  <p class="lede">각 화면은 독립된 로직(lib/)을 갖고 있어, 습관 스트릭 계산이나 목표 진행률 같은 규칙을 화면과 분리해 테스트할 수 있습니다.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="icon-wrap"><img src="/sprout-assignment.png" alt="과제" /></div>
+      <h3>과제</h3>
+      <p>마감일 기준으로 D-day를 계산하고, 임박·지연 항목을 자동으로 구분해 보여줍니다.</p>
+    </div>
+    <div class="card">
+      <div class="icon-wrap"><img src="/sprout-budget.png" alt="예산" /></div>
+      <h3>예산</h3>
+      <p>수입과 지출을 기록하고 월말에는 자동으로 결산 알림을 받을 수 있습니다.</p>
+    </div>
+    <div class="card">
+      <div class="icon-wrap"><img src="/sprout-diary.png" alt="일기" /></div>
+      <h3>일기</h3>
+      <p>다섯 가지 감정 아이콘으로 하루 기분을 남기고, 지난 기록을 돌아봅니다.</p>
+    </div>
+    <div class="card">
+      <div class="icon-wrap"><img src="/sprout-goal.png" alt="목표" /></div>
+      <h3>목표</h3>
+      <p>과제와 습관을 하나의 목표로 묶어, 두 요소를 함께 반영한 진행률을 보여줍니다.</p>
+    </div>
+    <div class="card">
+      <div class="icon-wrap"><img src="/sprout-summary.png" alt="요약" /></div>
+      <h3>주간 요약</h3>
+      <p>습관 준수율·완료 과제 수·지출·목표 진행률을 지난주와 비교해 보여줍니다.</p>
+    </div>
+    <div class="card wide">
+      <div class="icon-wrap"><img src="/achievement.png" alt="성취" style="height:84px;width:auto" /></div>
+      <div>
+        <h3>습관 &amp; 성취</h3>
+        <p>매일·매주·매월 습관의 연속 기록(streak)을 계산해, 꾸준함이 눈에 보이는 형태로 쌓입니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="diary-mood">
+  <span class="eyebrow">DIARY</span>
+  <h2>오늘의 기분을 다섯 가지로</h2>
+  <p class="lede">일기를 쓸 때마다 기분을 하나 골라 남깁니다. 대시보드와 일기 화면이 같은 아이콘 표를 공유합니다.</p>
+  <div class="mood-strip">
+    <div class="mood"><img src="/emotion-happy.png" alt="활짝" /><span>활짝</span></div>
+    <div class="mood"><img src="/emotion-smile.png" alt="좋음" /><span>좋음</span></div>
+    <div class="mood"><img src="/emotion-neutral.png" alt="보통" /><span>보통</span></div>
+    <div class="mood"><img src="/emotion-sad.png" alt="시무룩" /><span>시무룩</span></div>
+    <div class="mood"><img src="/emotion-cry.png" alt="울음" /><span>울음</span></div>
+  </div>
+</section>
+
+<section id="ai">
+  <div class="two-col">
+    <div>
+      <span class="eyebrow">SMART NOTIFICATIONS</span>
+      <h2>알아서 챙기는 알림</h2>
+      <p class="lede">매일 정해진 시각에 오늘 챙겨야 할 일을 모아 후보로 만들고, Gemini API가 이를 자연스러운 문장으로 다듬어 보여줍니다.</p>
+      <div class="list">
+        <div class="list-item">
+          <span class="dot">1</span>
+          <div><strong>과제 · 목표 D-day</strong><p>설정한 기준일(예: D-5, D-3, D-1, D-day)에 맞는 항목만 골라냅니다.</p></div>
+        </div>
+        <div class="list-item">
+          <span class="dot">2</span>
+          <div><strong>습관 리마인더</strong><p>지정한 시각까지 아직 채우지 못한 습관만 조용히 알려줍니다.</p></div>
+        </div>
+        <div class="list-item">
+          <span class="dot">3</span>
+          <div><strong>월말 예산 결산</strong><p>매달 마지막 날, 그 달의 수입·지출을 정리해 알려줍니다.</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="hero-art">
+      <img src="/lifeos_charcter.png" alt="LifeOS 캐릭터" style="max-width:260px" />
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="brand">
+    <img src="/mark-face.svg" alt="" style="height:1.2rem" />
+    <img src="/mark-lifeos.png" alt="LifeOS" style="height:1.1rem" />
+  </div>
+  작은 습관을 큰 변화로 이어주는 LifeOS
+</footer>
+
+</body>
+</html>
